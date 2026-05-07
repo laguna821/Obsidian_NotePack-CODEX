@@ -1,4 +1,7 @@
-# NotePack CODEX
+# NotePack CODEX v.2.0.0
+
+<img width="1194" height="595" alt="{583074D0-61B6-4954-8C26-8FCFE3C90E5A}" src="https://github.com/user-attachments/assets/7a3f2346-5f4e-4ae8-975b-667b280310aa" />
+
 
 > **Bottom-up writing tool** — 메모를 던지면 AI 페르소나들이 토론하며 주석을 달고, 사고가 막히면 **하스스톤식 아이디어 카드 뽑기**로 글쓰기 주제를 강제로 파생시켜주는 옵시디언 플러그인.
 

@@ -1,0 +1,21 @@
+{
+  "name": "achmage-notepack-codex",
+  "version": "3.0.0",
+  "description": "Obsidian plugin — board-first thinking workbench with AI enrichment and NotePack card generation",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "test": "node --test tests/*.test.mjs",
+    "check:secrets": "node scripts/check-secrets.mjs"
+  },
+  "keywords": [],
+  "author": "Achmage",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "^1.7.0",
+    "typescript": "^5.7.0"
+  }
+}

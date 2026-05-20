@@ -1,6 +1,6 @@
 {
   "name": "achmage-notepack-codex",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Obsidian plugin — board-first thinking workbench with AI enrichment and NotePack card generation",
   "main": "main.js",
   "scripts": {

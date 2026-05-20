@@ -26,6 +26,11 @@
   --np-rarity-rare: #4fa3ff;
   --np-rarity-epic: #b26bff;
   --np-rarity-legendary: #ffb14f;
+
+  /* AI blue (UX polish overrides) */
+  --np-ai-blue: #155eef;
+  --np-ai-blue-bg: color-mix(in srgb, #155eef 9%, var(--np-bg));
+  --np-ai-blue-border: color-mix(in srgb, #155eef 34%, var(--np-border));
 }
 
 /* ── Container ──────────────────────────────────────────────────────────── */
@@ -107,7 +112,7 @@
 .np-header-offline-toggle--active {
   background: var(--np-accent);
   border-color: var(--np-accent);
-  color: var(--text-on-accent, #fff);
+  color: var(--text-on-accent, #ffffff);
 }
 
 /* ── View Switcher ──────────────────────────────────────────────────────── */
@@ -223,14 +228,14 @@
   color: var(--np-text-muted);
 }
 
-.notepack-settings-card-status {
+.notepack-settings-card-status.notepack-settings-card-status {
   font-weight: 500;
-  color: var(--np-text) !important;
+  color: var(--np-text);
 }
 
-.notepack-settings-card-baseurl {
+.notepack-settings-card-baseurl.notepack-settings-card-baseurl {
   font-family: var(--font-monospace, monospace);
-  font-size: 11px !important;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -464,7 +469,7 @@
 .np-board-multiselect-toggle--active {
   background: var(--np-accent);
   border-color: var(--np-accent);
-  color: var(--text-on-accent, #fff);
+  color: var(--text-on-accent, #ffffff);
 }
 
 .np-board-action-bar {
@@ -651,9 +656,6 @@
 
 .np-md-btn {
   flex-shrink: 0;
-}
-
-.np-md-btn {
   min-width: 28px;
   height: 28px;
   padding: 0 6px;
@@ -1070,7 +1072,7 @@
 }
 
 .np-composer-modal-pane--editor .np-md-toolbar {
-  display: flex !important;
+  display: flex;
 }
 
 .np-composer-modal-pane-label {
@@ -2499,15 +2501,6 @@
   margin-top: 4px;
 }
 
-.notepack-settings-agent-grid {
-  margin-top: 12px;
-}
-
-.notepack-settings-agent-card .setting-item {
-  border-top: 1px solid var(--np-border);
-  padding: 10px 0;
-}
-
 .notepack-settings-agent-card textarea {
   min-height: 70px;
 }
@@ -2593,12 +2586,6 @@
 }
 
 /* UX polish overrides */
-
-:root {
-  --np-ai-blue: #155eef;
-  --np-ai-blue-bg: color-mix(in srgb, #155eef 9%, var(--np-bg));
-  --np-ai-blue-border: color-mix(in srgb, #155eef 34%, var(--np-border));
-}
 
 .theme-dark {
   --np-ai-blue: #8ab4ff;
@@ -2743,7 +2730,7 @@
   border-color: var(--text-error);
 }
 
-.np-inspector-annotation-card {
+.np-inspector-annotation-card.np-inspector-annotation-card {
   border-color: var(--np-ai-blue-border);
   background: var(--np-ai-blue-bg);
   box-shadow: inset 3px 0 0 var(--np-ai-blue);
@@ -2753,29 +2740,29 @@
   box-shadow: inset 3px 0 0 var(--np-ai-blue), 0 0 0 1px color-mix(in srgb, var(--np-ai-blue) 10%, transparent);
 }
 
-.np-inspector-annotation-agent {
+.np-inspector-annotation-agent.np-inspector-annotation-agent {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--np-ai-blue);
 }
 
-.np-inspector-annotation {
+.np-inspector-annotation.np-inspector-annotation {
   color: var(--np-ai-blue);
   font-style: normal;
 }
 
-.np-inspector-annotation-card--error {
+.np-inspector-annotation-card--error.np-inspector-annotation-card--error {
   background: color-mix(in srgb, var(--text-error) 8%, var(--np-bg));
   box-shadow: inset 3px 0 0 var(--text-error);
 }
 
-.np-inspector-annotation-card--running {
+.np-inspector-annotation-card--running.np-inspector-annotation-card--running {
   box-shadow: inset 3px 0 0 var(--np-accent);
 }
 
-.notepack-settings-agent-grid {
-  display: flex !important;
+.notepack-settings-agent-grid.notepack-settings-agent-grid {
+  display: flex;
   grid-template-columns: none;
   flex-direction: column;
   gap: 16px;
@@ -2787,7 +2774,7 @@
   width: 100%;
 }
 
-.notepack-settings-agent-card .setting-item {
+.notepack-settings-agent-card.notepack-settings-agent-card .setting-item {
   display: flex;
   align-items: flex-start;
   gap: 18px;
@@ -2872,8 +2859,8 @@
   margin-left: 2px;
 }
 
-.notepack-settings-persona-tab-add {
-  border-style: dashed !important;
+.notepack-settings-persona-tab-add.notepack-settings-persona-tab-add {
+  border-style: dashed;
   color: var(--np-text-muted, var(--np-text));
   opacity: 0.8;
 }
@@ -2966,8 +2953,8 @@
   border-color: var(--np-accent, var(--np-text));
 }
 
-.notepack-settings-persona-custom-instruction {
-  min-height: 220px !important;
+.notepack-settings-persona-custom-instruction.notepack-settings-persona-custom-instruction {
+  min-height: 220px;
   font-family: var(--font-monospace, monospace);
   font-size: 12px;
   line-height: 1.5;
@@ -2980,7 +2967,7 @@
   font-style: italic;
 }
 
-.np-inspector-annotation-header {
+.np-inspector-annotation-header.np-inspector-annotation-header {
   display: flex;
   align-items: center;
   gap: 8px;

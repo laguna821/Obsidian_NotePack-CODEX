@@ -3,7 +3,7 @@
   "name": "NotePack CODEX",
   "version": "3.0.0",
   "minAppVersion": "1.4.0",
-  "description": "Board-first thinking workbench with quiet AI enrichment and per-note card pack generation",
+  "description": "Board-first thinking workbench with quiet AI enrichment and per-note card pack generation.",
   "author": "Achmage",
   "isDesktopOnly": false
 }

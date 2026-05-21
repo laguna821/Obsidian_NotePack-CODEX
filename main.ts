@@ -118,6 +118,7 @@ export default class NotePackPlugin extends Plugin {
     });
 
     this.installFolderContextMenuHook();
+    this.installFileExplorerToolbarButton();
 
     this.addSettingTab(new NotePackSettingTab(this.app, this));
     console.log(`NotePack CODEX loaded. v${this.manifest.version}`);
@@ -220,6 +221,13 @@ export default class NotePackPlugin extends Plugin {
             await this.createNewWorkbenchAt(folderPath);
           });
       });
+      // Mark the menu's DOM element so the DOM-injection MutationObserver
+      // path knows the API path has already added our item — even if the
+      // DOM render of the API-added item is delayed past observer fire time.
+      const menuEl = (menu as unknown as { dom?: HTMLElement }).dom;
+      if (menuEl instanceof HTMLElement) {
+        menuEl.dataset.notepackHandled = "1";
+      }
     };
 
     this.registerEvent(this.app.workspace.on("file-menu", addViaApi));
@@ -246,6 +254,11 @@ export default class NotePackPlugin extends Plugin {
       return false;
     };
 
+    // Per-menu cleanup callbacks for document-level mousedown listeners that
+    // we register when injecting our item. Keyed by the menu element so we can
+    // tear listeners down when the menu is removed (closed via Esc, blur, etc.).
+    const menuCleanups = new WeakMap<HTMLElement, () => void>();
+
     let pendingFolderPath: string | null = null;
     const onContextMenu = (evt: MouseEvent) => {
       const target = evt.target as HTMLElement | null;
@@ -264,6 +277,10 @@ export default class NotePackPlugin extends Plugin {
     this.register(() => document.removeEventListener("contextmenu", onContextMenu, true));
 
     const injectIntoDomMenu = (menuEl: HTMLElement, folderPath: string) => {
+      // If the API path already attached our item to this menu (marker set
+      // in addViaApi), skip DOM injection entirely to avoid duplicate items
+      // and the resulting double-fire on click.
+      if (menuEl.dataset.notepackHandled === "1") return;
       if (findOurItem(menuEl)) return;
 
       const item = document.createElement("div");
@@ -280,10 +297,68 @@ export default class NotePackPlugin extends Plugin {
       titleEl.textContent = ourTitle();
       item.appendChild(titleEl);
 
-      item.addEventListener("click", () => {
+      // Obsidian's built-in Menu (used by the default file-explorer's empty-area
+      // context menu) closes itself on `mousedown` via a listener on document.
+      // A naive `addEventListener("click", ...)` on our DOM-injected item never
+      // fires because the menu element is detached before mouseup, and even an
+      // item-level `pointerdown`/`mousedown` listener can be beaten by
+      // Obsidian's own document-level handler depending on registration order
+      // and dispatch path.
+      //
+      // Strategy: register a document-level CAPTURE-phase mousedown listener
+      // when we inject the item. Capture-phase listeners on `document` are the
+      // earliest point we can observe the event, before it reaches any
+      // descendant (including .menu). We stopImmediatePropagation so Obsidian's
+      // own close handler can't fire its callback ahead of our create. A
+      // single-shot `handled` guard prevents double-fire if the item-level
+      // fallback also runs.
+      let handled = false;
+      const fire = () => {
+        if (handled) return;
+        handled = true;
+        cleanup();
         void this.createNewWorkbenchAt(folderPath);
         menuEl.detach?.();
         if (menuEl.parentElement) menuEl.remove();
+      };
+      const docHandler = (evt: MouseEvent | PointerEvent) => {
+        if ((evt as MouseEvent).button !== 0) return;
+        const target = evt.target as Node | null;
+        if (!target || !item.contains(target)) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        evt.stopImmediatePropagation();
+        fire();
+      };
+      const cleanup = () => {
+        document.removeEventListener("pointerdown", docHandler, true);
+        document.removeEventListener("mousedown", docHandler, true);
+        menuCleanups.delete(menuEl);
+      };
+      // Cover both pointerdown (fires earlier) and mousedown (some browsers /
+      // some Obsidian versions only stop one of them).
+      document.addEventListener("pointerdown", docHandler, true);
+      document.addEventListener("mousedown", docHandler, true);
+      menuCleanups.set(menuEl, cleanup);
+
+      // Belt-and-braces: item-level listeners for the case where document
+      // capture is bypassed entirely. `handled` guards idempotency.
+      item.addEventListener("pointerdown", (evt) => {
+        if (evt.button !== 0) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        fire();
+      });
+      item.addEventListener("mousedown", (evt) => {
+        if (evt.button !== 0) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        fire();
+      });
+      item.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        fire();
       });
 
       // Mimic Obsidian's keyboard-nav highlight on hover so our DOM-injected
@@ -307,6 +382,14 @@ export default class NotePackPlugin extends Plugin {
     const observer = new MutationObserver((mutations) => {
       const folderPath = pendingFolderPath;
       for (const m of mutations) {
+        // Tear down per-menu listeners when the menu element is removed from
+        // the body (covers Esc, blur, click-elsewhere — anything that closes
+        // the menu without triggering our injected item's path).
+        for (const node of Array.from(m.removedNodes)) {
+          if (!(node instanceof HTMLElement)) continue;
+          const cleanup = menuCleanups.get(node);
+          cleanup?.();
+        }
         for (const node of Array.from(m.addedNodes)) {
           if (!(node instanceof HTMLElement)) continue;
           if (!node.classList.contains("menu")) continue;
@@ -322,6 +405,65 @@ export default class NotePackPlugin extends Plugin {
     });
     observer.observe(document.body, { childList: true, subtree: false });
     this.register(() => observer.disconnect());
+  }
+
+  // File-explorer header toolbar button — adds a "새 메모 작업실" icon between
+  // Obsidian's "새 노트" and "새 폴더" buttons so that brand-new Obsidian users
+  // can discover the feature without right-clicking. Runs on every file
+  // explorer leaf currently open and re-installs on layout changes (covers
+  // newly opened explorers and re-renders that wipe the toolbar).
+  private installFileExplorerToolbarButton(): void {
+    const TOOLBAR_FLAG = "data-notepack-toolbar-button";
+    const NEW_NOTE_LABELS = new Set(["새 노트", "New note"]);
+    const ourLabel = () => t("newWorkbenchMenuItem");
+
+    const installInLeaf = (leaf: WorkspaceLeaf) => {
+      const view = leaf?.view;
+      if (!view || view.getViewType() !== "file-explorer") return;
+      const container = view.containerEl;
+      if (!container) return;
+      const navButtons = container.querySelector<HTMLElement>(".nav-buttons-container");
+      if (!navButtons) return;
+      if (navButtons.querySelector(`[${TOOLBAR_FLAG}]`)) return;
+
+      const button = document.createElement("div");
+      button.className = "clickable-icon nav-action-button";
+      button.setAttribute("aria-label", ourLabel());
+      button.setAttribute(TOOLBAR_FLAG, "1");
+      setIcon(button, "layers");
+      button.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        void this.createNewWorkbench();
+      });
+
+      // Slot the button right after "새 노트"/"New note"; fall back to index 1
+      // (after the first button) if labels don't match, or append at end.
+      const allButtons = Array.from(
+        navButtons.querySelectorAll<HTMLElement>(".clickable-icon"),
+      );
+      const newNoteBtn = allButtons.find((b) => {
+        const label = b.getAttribute("aria-label") ?? "";
+        return NEW_NOTE_LABELS.has(label);
+      }) ?? allButtons[0] ?? null;
+      if (newNoteBtn?.nextSibling) {
+        navButtons.insertBefore(button, newNoteBtn.nextSibling);
+      } else if (newNoteBtn) {
+        navButtons.appendChild(button);
+      } else {
+        navButtons.appendChild(button);
+      }
+    };
+
+    const scanAll = () => {
+      this.app.workspace.iterateAllLeaves((leaf) => installInLeaf(leaf));
+    };
+
+    this.app.workspace.onLayoutReady(() => scanAll());
+    // Re-scan on workspace layout changes: covers newly opened explorers,
+    // sidebar toggles, and theme/plugin reloads that rebuild the header.
+    this.registerEvent(this.app.workspace.on("layout-change", () => scanAll()));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => scanAll()));
   }
 
   async createNewWorkbench(): Promise<void> {
@@ -376,9 +518,18 @@ export default class NotePackPlugin extends Plugin {
     const parts = folder.split("/");
     let current = "";
     for (const part of parts) {
+      if (!part) continue;
       current = current ? `${current}/${part}` : part;
-      if (!this.app.vault.getAbstractFileByPath(current)) {
+      if (this.app.vault.getAbstractFileByPath(current)) continue;
+      try {
         await this.app.vault.createFolder(current);
+      } catch (err) {
+        // Race / cache miss: another concurrent call (or Obsidian's own
+        // metadata cache) may have just made the folder visible. If the
+        // path now resolves, treat the error as benign and continue.
+        if (!this.app.vault.getAbstractFileByPath(current)) {
+          throw err;
+        }
       }
     }
   }

@@ -26,11 +26,6 @@
   --np-rarity-rare: #4fa3ff;
   --np-rarity-epic: #b26bff;
   --np-rarity-legendary: #ffb14f;
-
-  /* AI blue (UX polish overrides) */
-  --np-ai-blue: #155eef;
-  --np-ai-blue-bg: color-mix(in srgb, #155eef 9%, var(--np-bg));
-  --np-ai-blue-border: color-mix(in srgb, #155eef 34%, var(--np-border));
 }
 
 /* ── Container ──────────────────────────────────────────────────────────── */
@@ -112,7 +107,7 @@
 .np-header-offline-toggle--active {
   background: var(--np-accent);
   border-color: var(--np-accent);
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent, #fff);
 }
 
 /* ── View Switcher ──────────────────────────────────────────────────────── */
@@ -228,14 +223,14 @@
   color: var(--np-text-muted);
 }
 
-.notepack-settings-card-status.notepack-settings-card-status {
+.notepack-settings-card-status {
   font-weight: 500;
-  color: var(--np-text);
+  color: var(--np-text) !important;
 }
 
-.notepack-settings-card-baseurl.notepack-settings-card-baseurl {
+.notepack-settings-card-baseurl {
   font-family: var(--font-monospace, monospace);
-  font-size: 11px;
+  font-size: 11px !important;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -469,7 +464,7 @@
 .np-board-multiselect-toggle--active {
   background: var(--np-accent);
   border-color: var(--np-accent);
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent, #fff);
 }
 
 .np-board-action-bar {
@@ -656,6 +651,9 @@
 
 .np-md-btn {
   flex-shrink: 0;
+}
+
+.np-md-btn {
   min-width: 28px;
   height: 28px;
   padding: 0 6px;
@@ -1072,7 +1070,7 @@
 }
 
 .np-composer-modal-pane--editor .np-md-toolbar {
-  display: flex;
+  display: flex !important;
 }
 
 .np-composer-modal-pane-label {
@@ -2194,6 +2192,104 @@
   color: var(--np-text-muted);
 }
 
+.np-pack-modal-grid--skeleton {
+  margin-bottom: 14px;
+  pointer-events: none;
+}
+
+.np-pack-card-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--np-bg-secondary);
+  border: 1px solid var(--np-border);
+  border-radius: 10px;
+  min-height: 180px;
+  opacity: 0;
+  animation:
+    np-pack-card-enter 360ms ease-out forwards,
+    np-skeleton-shimmer 1.6s linear infinite;
+}
+
+.np-pack-card-skeleton-badge {
+  width: 64px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--np-bg-tertiary) 0%,
+    var(--np-border) 50%,
+    var(--np-bg-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  animation: np-skeleton-shimmer 1.6s linear infinite;
+}
+
+.np-pack-card-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--np-bg-tertiary) 0%,
+    var(--np-border) 50%,
+    var(--np-bg-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  animation: np-skeleton-shimmer 1.6s linear infinite;
+}
+
+.np-pack-card-skeleton-line--name {
+  height: 18px;
+  width: 72%;
+  margin-top: 2px;
+}
+
+.np-pack-card-skeleton-line--hook {
+  width: 92%;
+  height: 10px;
+}
+
+.np-pack-card-skeleton-line--question {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.np-pack-card-skeleton-line--question-short {
+  width: 58%;
+}
+
+@keyframes np-skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.np-pack-modal-stage-text {
+  text-align: center;
+  font-size: 13px;
+  color: var(--np-text-muted);
+  padding: 4px 0 12px;
+  letter-spacing: 0.02em;
+}
+
+.np-pack-modal-reroll--busy {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.np-pack-card--entering {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: np-pack-card-enter 350ms ease-out forwards;
+}
+
+@keyframes np-pack-card-enter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .np-pack-modal-error {
   text-align: center;
   padding: 32px;
@@ -2501,6 +2597,15 @@
   margin-top: 4px;
 }
 
+.notepack-settings-agent-grid {
+  margin-top: 12px;
+}
+
+.notepack-settings-agent-card .setting-item {
+  border-top: 1px solid var(--np-border);
+  padding: 10px 0;
+}
+
 .notepack-settings-agent-card textarea {
   min-height: 70px;
 }
@@ -2586,6 +2691,12 @@
 }
 
 /* UX polish overrides */
+
+:root {
+  --np-ai-blue: #155eef;
+  --np-ai-blue-bg: color-mix(in srgb, #155eef 9%, var(--np-bg));
+  --np-ai-blue-border: color-mix(in srgb, #155eef 34%, var(--np-border));
+}
 
 .theme-dark {
   --np-ai-blue: #8ab4ff;
@@ -2730,7 +2841,7 @@
   border-color: var(--text-error);
 }
 
-.np-inspector-annotation-card.np-inspector-annotation-card {
+.np-inspector-annotation-card {
   border-color: var(--np-ai-blue-border);
   background: var(--np-ai-blue-bg);
   box-shadow: inset 3px 0 0 var(--np-ai-blue);
@@ -2740,29 +2851,29 @@
   box-shadow: inset 3px 0 0 var(--np-ai-blue), 0 0 0 1px color-mix(in srgb, var(--np-ai-blue) 10%, transparent);
 }
 
-.np-inspector-annotation-agent.np-inspector-annotation-agent {
+.np-inspector-annotation-agent {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--np-ai-blue);
 }
 
-.np-inspector-annotation.np-inspector-annotation {
+.np-inspector-annotation {
   color: var(--np-ai-blue);
   font-style: normal;
 }
 
-.np-inspector-annotation-card--error.np-inspector-annotation-card--error {
+.np-inspector-annotation-card--error {
   background: color-mix(in srgb, var(--text-error) 8%, var(--np-bg));
   box-shadow: inset 3px 0 0 var(--text-error);
 }
 
-.np-inspector-annotation-card--running.np-inspector-annotation-card--running {
+.np-inspector-annotation-card--running {
   box-shadow: inset 3px 0 0 var(--np-accent);
 }
 
-.notepack-settings-agent-grid.notepack-settings-agent-grid {
-  display: flex;
+.notepack-settings-agent-grid {
+  display: flex !important;
   grid-template-columns: none;
   flex-direction: column;
   gap: 16px;
@@ -2774,7 +2885,7 @@
   width: 100%;
 }
 
-.notepack-settings-agent-card.notepack-settings-agent-card .setting-item {
+.notepack-settings-agent-card .setting-item {
   display: flex;
   align-items: flex-start;
   gap: 18px;
@@ -2859,8 +2970,8 @@
   margin-left: 2px;
 }
 
-.notepack-settings-persona-tab-add.notepack-settings-persona-tab-add {
-  border-style: dashed;
+.notepack-settings-persona-tab-add {
+  border-style: dashed !important;
   color: var(--np-text-muted, var(--np-text));
   opacity: 0.8;
 }
@@ -2953,11 +3064,52 @@
   border-color: var(--np-accent, var(--np-text));
 }
 
-.notepack-settings-persona-custom-instruction.notepack-settings-persona-custom-instruction {
-  min-height: 220px;
+.notepack-settings-persona-preset-button--active {
+  background: var(--np-bg-secondary);
+  border-color: var(--np-accent, var(--np-text));
+  font-weight: 600;
+}
+
+.notepack-settings-difficulty-isolation {
+  margin: -4px 0 16px 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--np-text-muted);
+  background: var(--np-bg-secondary);
+  border-left: 3px solid var(--np-accent, var(--np-text));
+  border-radius: 4px;
+}
+
+.notepack-settings-difficulty-section {
+  margin-top: 16px;
+}
+
+.notepack-settings-persona-custom-instruction {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 220px !important;
   font-family: var(--font-monospace, monospace);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.notepack-settings-difficulty-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 16px 0 12px 0;
+}
+
+.notepack-settings-difficulty-custom-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--np-text);
+}
+
+.notepack-settings-difficulty-custom-desc {
+  font-size: 12px;
+  color: var(--np-text-muted);
+  margin-bottom: 4px;
 }
 
 .notepack-settings-inline-warning {
@@ -2967,7 +3119,7 @@
   font-style: italic;
 }
 
-.np-inspector-annotation-header.np-inspector-annotation-header {
+.np-inspector-annotation-header {
   display: flex;
   align-items: center;
   gap: 8px;

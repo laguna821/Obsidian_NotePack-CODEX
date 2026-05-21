@@ -251,8 +251,6 @@ interface TranslationSet {
   settingsTabCardDifficulty: string;
   settingsCardDifficultyHeading: string;
   settingsCardDifficultyIsolationNote: string;
-  settingsPackDifficultySection: string;
-  settingsSynthesisDifficultySection: string;
   settingsDifficultyPresetsLabel: string;
   settingsDifficultyCustomLabel: string;
   settingsDifficultyCustomDesc: string;
@@ -509,9 +507,7 @@ const ko: TranslationSet = {
   settingsNoteAuthorDesc: "노트로 승급할 때 frontmatter의 `author` 필드에 들어갑니다. 비우면 author 필드를 만들지 않습니다.",
   settingsTabCardDifficulty: "카드 난이도",
   settingsCardDifficultyHeading: "🃏 카드 난이도",
-  settingsCardDifficultyIsolationNote: "이 설정은 카드 뽑기와 테마 생성에만 적용됩니다. AI 주석 페르소나의 말투는 절대 바뀌지 않습니다.",
-  settingsPackDifficultySection: "카드 뽑기 난이도",
-  settingsSynthesisDifficultySection: "테마 생성 난이도",
+  settingsCardDifficultyIsolationNote: "이 설정은 카드 뽑기에 적용됩니다 (한 장이든 여러 장이든 동일). AI 주석 페르소나의 말투에는 절대 영향이 없습니다.",
   settingsDifficultyPresetsLabel: "프리셋",
   settingsDifficultyCustomLabel: "풀 커스텀 프롬프트",
   settingsDifficultyCustomDesc: "직접 다듬어 입력해도 됩니다. 비우면 기본값(쉬움)이 자동으로 적용됩니다.",
@@ -768,9 +764,7 @@ const en: TranslationSet = {
   settingsNoteAuthorDesc: "Written to the frontmatter `author` field when promoting a card to a note. Leave blank to omit the author line.",
   settingsTabCardDifficulty: "Card Difficulty",
   settingsCardDifficultyHeading: "🃏 Card Difficulty",
-  settingsCardDifficultyIsolationNote: "These settings only affect card draws and synthesis. AI annotation persona tone is never affected.",
-  settingsPackDifficultySection: "Card draw difficulty",
-  settingsSynthesisDifficultySection: "Synthesis difficulty",
+  settingsCardDifficultyIsolationNote: "This setting applies to card draws (single or multi-card alike). AI annotation persona tone is never affected.",
   settingsDifficultyPresetsLabel: "Presets",
   settingsDifficultyCustomLabel: "Full custom prompt",
   settingsDifficultyCustomDesc: "Edit freely. Leave blank to fall back to the default easy preset.",

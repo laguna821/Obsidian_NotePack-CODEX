@@ -27,7 +27,6 @@ import {
 import { PERSONA_PRESET_ENTRIES } from "./ai/persona-presets";
 import {
   PACK_DIFFICULTY_PRESETS,
-  SYNTHESIS_DIFFICULTY_PRESETS,
   type DifficultyPresetEntry,
 } from "./ai/difficulty-presets";
 import {
@@ -1918,28 +1917,19 @@ export class NotePackSettingTab extends PluginSettingTab {
       text: t("settingsCardDifficultyIsolationNote"),
     });
 
+    // Synthesis difficulty UI removed in v3.0.3 — pack draw difficulty applies
+    // to all card-draw scenarios (single or multi-card). The synthesis backend
+    // (generateSynthesis) still exists and falls back to the built-in easy
+    // preset when no custom prompt is stored.
     this.renderDifficultyPromptSection(
       containerEl,
-      t("settingsPackDifficultySection"),
+      "",
       PACK_DIFFICULTY_PRESETS,
       settings.customPackDifficultyPrompt ?? "",
       (value) => {
         this.saveSettings({
           ...this.plugin.settingsStore.settings,
           customPackDifficultyPrompt: value,
-        });
-      },
-    );
-
-    this.renderDifficultyPromptSection(
-      containerEl,
-      t("settingsSynthesisDifficultySection"),
-      SYNTHESIS_DIFFICULTY_PRESETS,
-      settings.customSynthesisPrompt ?? "",
-      (value) => {
-        this.saveSettings({
-          ...this.plugin.settingsStore.settings,
-          customSynthesisPrompt: value,
         });
       },
     );
@@ -1953,7 +1943,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     onSave: (value: string) => void,
   ): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section notepack-settings-difficulty-section" });
-    section.createEl("h4", { text: sectionTitle });
+    if (sectionTitle) section.createEl("h4", { text: sectionTitle });
 
     const presetsBlock = section.createDiv({ cls: "notepack-settings-persona-presets" });
     presetsBlock.createEl("h5", { text: t("settingsDifficultyPresetsLabel") });
@@ -1975,23 +1965,31 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
     });
 
-    new Setting(section)
-      .setName(t("settingsDifficultyCustomLabel"))
-      .setDesc(t("settingsDifficultyCustomDesc"))
-      .addTextArea((text) => {
-        text
-          .setPlaceholder(presets[0]?.body ?? "")
-          .setValue(currentValue)
-          .onChange((value) => {
-            onSave(value);
-          });
-        text.inputEl.addClass("notepack-settings-persona-custom-instruction");
-        text.inputEl.rows = 16;
-      });
+    // Custom prompt textarea — stacked layout (label on top, textarea full-width
+    // below) so the editor isn't crammed into Obsidian's narrow right column.
+    const customBlock = section.createDiv({ cls: "notepack-settings-difficulty-custom" });
+    customBlock.createEl("div", {
+      text: t("settingsDifficultyCustomLabel"),
+      cls: "notepack-settings-difficulty-custom-label",
+    });
+    customBlock.createEl("div", {
+      text: t("settingsDifficultyCustomDesc"),
+      cls: "notepack-settings-difficulty-custom-desc",
+    });
+    const textarea = customBlock.createEl("textarea", {
+      cls: "notepack-settings-persona-custom-instruction",
+    });
+    textarea.placeholder = presets[0]?.body ?? "";
+    textarea.value = currentValue;
+    textarea.rows = 16;
+    textarea.addEventListener("input", () => {
+      onSave(textarea.value);
+    });
 
     new Setting(section)
       .addButton((button) => {
         button.setButtonText(t("settingsDifficultyReset")).onClick(() => {
+          textarea.value = "";
           onSave("");
         });
       });

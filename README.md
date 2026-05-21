@@ -1,4 +1,24 @@
-# NotePack CODEX
+# NotePack CODEX v3.0.3
+
+<img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
+
+## About (English)
+
+**NotePack CODEX** is an Obsidian plugin that turns scattered memos into a bottom-up writing workbench. AI personas debate and annotate your notes in the background, and when your thinking stalls, a Hearthstone-style **idea card pack** forces you into angles you would not have picked yourself.
+
+Key features in v3:
+
+- **Multi-seed cardpacks** — pick several notes via multi-select and draw cards that synthesize cross-seed context.
+- **Offline capture mode** — toggle AI off and just dump memos; AI catches up later.
+- **Batch AI annotation** — multi-select cards and run annotations with a concurrency-3 queue, retry-aware.
+- **Plan mode trio** — OpenAI / Claude / Gemini all formally validated; bring your own API keys (BYOK).
+- **Quantum metacognition cardpacks** — five rarity tiers tuned by your set grade level.
+
+NotePack CODEX operates on `.codex` files inside your vault, kept separate from regular markdown so the AI-enriched workbench does not pollute your notes. Promote favorite cards into proper markdown notes when they are ready.
+
+The Korean documentation below is the canonical version maintained by the author.
+
+---
 
 > **Bottom-up writing tool** — 메모를 던지면 AI 페르소나들이 토론하며 주석을 달고, 사고가 막히면 **하스스톤식 아이디어 카드 뽑기**로 글쓰기 주제를 강제로 파생시켜주는 옵시디언 플러그인.
 
@@ -255,6 +275,16 @@ v2.0.0 첫 실행 시 자동으로 처리됩니다:
 4. UI 용어 변경: "카드팩 뽑기" → "아이디어 카드 생성", 등급 일반/희귀/영웅/전설 → 기본/주목/핵심/원형
 
 ⚠️ **사용자가 직접 처리할 항목 1건**: 평문 시크릿이 v1.x 설치본에 박혀 있었으므로 자기 GCP 콘솔에서 해당 OAuth client_secret을 회전(reset) 또는 삭제 권장. v2 코드는 더 이상 그 시크릿을 사용하지 않지만, 평문이 git 히스토리·이전 빌드에 남아 있을 수 있어 회전이 가장 안전.
+
+---
+## 개인정보와 네트워크 사용
+
+NotePack CODEX는 사용자가 선택한 AI 제공자(OpenAI, Anthropic, Gemini, OpenRouter 등)로 노트 내용을 보낼 수 있습니다.
+
+네트워크 요청은 AI 주석 생성과 아이디어 카드 생성에만 사용됩니다. 사용자가 직접 AI 제공자 또는 인증 방식을 설정해야 AI 기능이 작동합니다.
+
+이 플러그인은 클라이언트 측 텔레메트리, 즉 사용자 행동을 몰래 수집해 보내는 기능을 포함하지 않습니다.
+
 
 ---
 

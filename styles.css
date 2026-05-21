@@ -26,6 +26,11 @@
   --np-rarity-rare: #4fa3ff;
   --np-rarity-epic: #b26bff;
   --np-rarity-legendary: #ffb14f;
+
+  /* AI annotation palette (light theme defaults; .theme-dark overrides below) */
+  --np-ai-blue: #155eef;
+  --np-ai-blue-bg: color-mix(in srgb, #155eef 9%, var(--np-bg));
+  --np-ai-blue-border: color-mix(in srgb, #155eef 34%, var(--np-border));
 }
 
 /* ── Container ──────────────────────────────────────────────────────────── */
@@ -107,7 +112,7 @@
 .np-header-offline-toggle--active {
   background: var(--np-accent);
   border-color: var(--np-accent);
-  color: var(--text-on-accent, #fff);
+  color: var(--text-on-accent, #ffffff);
 }
 
 /* ── View Switcher ──────────────────────────────────────────────────────── */
@@ -223,14 +228,14 @@
   color: var(--np-text-muted);
 }
 
-.notepack-settings-card-status {
+.notepack-settings-card-status.notepack-settings-card-status {
   font-weight: 500;
-  color: var(--np-text) !important;
+  color: var(--np-text);
 }
 
-.notepack-settings-card-baseurl {
+.notepack-settings-card-baseurl.notepack-settings-card-baseurl {
   font-family: var(--font-monospace, monospace);
-  font-size: 11px !important;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -464,7 +469,7 @@
 .np-board-multiselect-toggle--active {
   background: var(--np-accent);
   border-color: var(--np-accent);
-  color: var(--text-on-accent, #fff);
+  color: var(--text-on-accent, #ffffff);
 }
 
 .np-board-action-bar {
@@ -651,9 +656,6 @@
 
 .np-md-btn {
   flex-shrink: 0;
-}
-
-.np-md-btn {
   min-width: 28px;
   height: 28px;
   padding: 0 6px;
@@ -1069,8 +1071,8 @@
   min-height: 240px;
 }
 
-.np-composer-modal-pane--editor .np-md-toolbar {
-  display: flex !important;
+.np-composer-modal-pane--editor .np-md-toolbar.np-md-toolbar {
+  display: flex;
 }
 
 .np-composer-modal-pane-label {
@@ -1804,9 +1806,9 @@
 .np-inspector-annotation {
   font-size: 13px;
   line-height: 1.5;
-  color: var(--np-text-muted);
+  color: var(--np-ai-blue);
   margin: 4px 0 0;
-  font-style: italic;
+  font-style: normal;
 }
 
 .np-inspector-annotations {
@@ -1817,32 +1819,44 @@
 }
 
 .np-inspector-annotation-card {
-  border: 1px solid var(--np-border);
+  border: 1px solid var(--np-ai-blue-border);
   border-radius: var(--np-radius-sm);
   padding: 10px;
-  background: var(--np-bg-secondary);
+  background: var(--np-ai-blue-bg);
+  box-shadow: inset 3px 0 0 var(--np-ai-blue);
 }
 
 .np-inspector-annotation-card--error {
   border-color: color-mix(in srgb, var(--text-error) 45%, var(--np-border));
+  background: color-mix(in srgb, var(--text-error) 8%, var(--np-bg));
+  box-shadow: inset 3px 0 0 var(--text-error);
 }
 
 .np-inspector-annotation-card--running {
   border-color: color-mix(in srgb, var(--np-accent) 45%, var(--np-border));
+  box-shadow: inset 3px 0 0 var(--np-accent);
 }
 
 .np-inspector-annotation-header {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
   align-items: center;
-  margin-bottom: 4px;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
 }
 
 .np-inspector-annotation-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 700;
-  color: var(--np-text);
+  color: var(--np-ai-blue);
 }
 
 .np-inspector-annotation-status,
@@ -2598,12 +2612,19 @@
 }
 
 .notepack-settings-agent-grid {
-  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 900px;
+  margin-top: 16px;
 }
 
 .notepack-settings-agent-card .setting-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
   border-top: 1px solid var(--np-border);
-  padding: 10px 0;
+  padding: 14px 0;
 }
 
 .notepack-settings-agent-card textarea {
@@ -2691,12 +2712,6 @@
 }
 
 /* UX polish overrides */
-
-:root {
-  --np-ai-blue: #155eef;
-  --np-ai-blue-bg: color-mix(in srgb, #155eef 9%, var(--np-bg));
-  --np-ai-blue-border: color-mix(in srgb, #155eef 34%, var(--np-border));
-}
 
 .theme-dark {
   --np-ai-blue: #8ab4ff;
@@ -2841,56 +2856,12 @@
   border-color: var(--text-error);
 }
 
-.np-inspector-annotation-card {
-  border-color: var(--np-ai-blue-border);
-  background: var(--np-ai-blue-bg);
-  box-shadow: inset 3px 0 0 var(--np-ai-blue);
-}
-
 .np-inspector-annotation-card--sequential {
   box-shadow: inset 3px 0 0 var(--np-ai-blue), 0 0 0 1px color-mix(in srgb, var(--np-ai-blue) 10%, transparent);
 }
 
-.np-inspector-annotation-agent {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--np-ai-blue);
-}
-
-.np-inspector-annotation {
-  color: var(--np-ai-blue);
-  font-style: normal;
-}
-
-.np-inspector-annotation-card--error {
-  background: color-mix(in srgb, var(--text-error) 8%, var(--np-bg));
-  box-shadow: inset 3px 0 0 var(--text-error);
-}
-
-.np-inspector-annotation-card--running {
-  box-shadow: inset 3px 0 0 var(--np-accent);
-}
-
-.notepack-settings-agent-grid {
-  display: flex !important;
-  grid-template-columns: none;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 900px;
-  margin-top: 16px;
-}
-
 .notepack-settings-agent-card {
   width: 100%;
-}
-
-.notepack-settings-agent-card .setting-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
-  border-top: 1px solid var(--np-border);
-  padding: 14px 0;
 }
 
 .notepack-settings-agent-card .setting-item-info {
@@ -2970,8 +2941,8 @@
   margin-left: 2px;
 }
 
-.notepack-settings-persona-tab-add {
-  border-style: dashed !important;
+.notepack-settings-persona-tab-add.notepack-settings-persona-tab-add {
+  border-style: dashed;
   color: var(--np-text-muted, var(--np-text));
   opacity: 0.8;
 }
@@ -3084,10 +3055,10 @@
   margin-top: 16px;
 }
 
-.notepack-settings-persona-custom-instruction {
+.notepack-settings-persona-custom-instruction.notepack-settings-persona-custom-instruction {
   width: 100%;
   box-sizing: border-box;
-  min-height: 220px !important;
+  min-height: 220px;
   font-family: var(--font-monospace, monospace);
   font-size: 12px;
   line-height: 1.5;
@@ -3117,19 +3088,6 @@
   font-size: 11px;
   color: rgba(220, 38, 38, 0.85);
   font-style: italic;
-}
-
-.np-inspector-annotation-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: transparent;
-  border: none;
-  padding: 4px 0;
-  cursor: pointer;
-  color: inherit;
-  text-align: left;
 }
 
 .np-inspector-annotation-toggle {

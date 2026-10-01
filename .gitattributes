@@ -1,0 +1,2 @@
+# esbuild bundles these as text; keep LF so a Windows build matches the CI release build.
+*.md text eol=lf

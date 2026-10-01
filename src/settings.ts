@@ -728,7 +728,7 @@ abstract class PlanConnectionModal extends Modal {
   protected setError(message = ""): void {
     if (!this.errorEl) return;
     this.errorEl.textContent = message;
-    this.errorEl.style.display = message ? "block" : "none";
+    this.errorEl.toggle(Boolean(message));
   }
 
   protected createFooter(): HTMLElement {
@@ -756,7 +756,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
 
     this.statusEl = this.contentEl.createDiv({ cls: "notepack-settings-note" });
     this.errorEl = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    this.errorEl.style.display = "none";
+    this.errorEl.hide();
 
     new Setting(this.contentEl)
       .setName("OpenAI login")
@@ -916,6 +916,20 @@ const RUNTIME_INSTALL_GUIDES: Record<NativeRuntimeProvider, string> = {
   claude: "https://code.claude.com/docs/en/installation",
   gemini: "https://antigravity.google/docs/cli/install",
 };
+
+type SettingsHeadingLevel = "section" | "card" | "sub";
+
+/**
+ * Settings headings go through Setting().setHeading(), which the Obsidian
+ * community review requires instead of raw heading elements.
+ */
+function addSettingsHeading(containerEl: HTMLElement, text: string, level: SettingsHeadingLevel = "section"): Setting {
+  return new Setting(containerEl)
+    .setName(text)
+    .setHeading()
+    .setClass("np-settings-heading")
+    .setClass(`np-settings-heading--${level}`);
+}
 
 function runtimeStatusLabel(snapshot: NativeRuntimeSnapshot): string {
   switch (snapshot.status) {
@@ -1106,7 +1120,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderPlanSection(containerEl: HTMLElement, settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsPlanConnections") });
+    addSettingsHeading(section, t("settingsPlanConnections"));
     section.createEl("p", {
       text: Platform.isDesktop
         ? t("settingsPlanConnectionsDesktopDesc")
@@ -1137,7 +1151,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     const models = getModelsForProvider(settings, provider.id);
     const card = containerEl.createDiv({ cls: "notepack-settings-card" });
 
-    card.createEl("h4", { text: title });
+    addSettingsHeading(card, title, "card");
     card.createEl("p", { text: description });
     card.createEl("p", {
       text: getPlanConnectionLabel(provider),
@@ -1202,7 +1216,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     const configuredModels = getModelsForProvider(settings, providerId).length;
 
     if (!Platform.isDesktop) {
-      card.createEl("h4", { text: title });
+      addSettingsHeading(card, title, "card");
       card.createEl("p", { text: description });
       card.createEl("p", { text: t("settingsPlanDesktopOnlyNotice"), cls: "notepack-settings-warning" });
       return;
@@ -1214,7 +1228,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     const paint = () => {
       const snapshot = runtime.getSnapshot(provider);
       card.empty();
-      card.createEl("h4", { text: title });
+      addSettingsHeading(card, title, "card");
       card.createEl("p", { text: description });
       if (provider === "claude") {
         card.createEl("p", { text: t("settingsRuntimeExperimental"), cls: "notepack-settings-note" });
@@ -1341,7 +1355,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderProviderSection(containerEl: HTMLElement, settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsApiKeyProviders") });
+    addSettingsHeading(section, t("settingsApiKeyProviders"));
     section.createEl("p", { text: t("settingsApiKeyProvidersDesc") });
 
     const toolbar = section.createDiv({ cls: "notepack-settings-toolbar" });
@@ -1377,7 +1391,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       const baseUrl = resolveProviderBaseUrl(provider);
       const card = grid.createDiv({ cls: "notepack-settings-card notepack-settings-provider-card" });
 
-      card.createEl("h4", { text: getProviderDisplayName(provider) });
+      addSettingsHeading(card, getProviderDisplayName(provider), "card");
       card.createEl("p", {
         text: getProviderConnectionSummary(provider),
         cls: "notepack-settings-card-status",
@@ -1420,7 +1434,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderAnnotationSection(containerEl: HTMLElement, settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsAnnotationAgentsHeading") });
+    addSettingsHeading(section, t("settingsAnnotationAgentsHeading"));
     section.createEl("p", { text: t("settingsAnnotationAgentsDesc") });
 
     const agents = normalizeAnnotationAgents(settings.annotationAgents, settings.activeChatModelId, {
@@ -1565,7 +1579,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     const headerTitle = activeAgent.label && activeAgent.label !== `AI ${this.activePersonaTab + 1}`
       ? `${t("settingsAgentLabelPrefix")} ${this.activePersonaTab + 1}: ${activeAgent.label}`
       : `${t("settingsAgentLabelPrefix")} ${this.activePersonaTab + 1}`;
-    cardHeader.createEl("h4", { text: headerTitle });
+    addSettingsHeading(cardHeader, headerTitle, "card");
 
     if (agents.length > 1) {
       const removeBtn = cardHeader.createEl("button", {
@@ -1615,7 +1629,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         text.setPlaceholder(t("settingsAgentIconPlaceholder"));
         text.setValue(activeAgent.icon ?? "");
         text.inputEl.maxLength = 4;
-        text.inputEl.style.width = "5em";
+        text.inputEl.addClass("np-settings-narrow-input");
         text.onChange((value) => {
           const trimmed = value.trim();
           const clipped = trimmed ? Array.from(trimmed).slice(0, 2).join("") : undefined;
@@ -1700,7 +1714,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
 
     const presetsBlock = card.createDiv({ cls: "notepack-settings-persona-presets" });
-    presetsBlock.createEl("h5", { text: t("settingsPersonaPresetsHeading") });
+    addSettingsHeading(presetsBlock, t("settingsPersonaPresetsHeading"), "sub");
     presetsBlock.createEl("p", { text: t("settingsPersonaPresetsDesc"), cls: "notepack-settings-persona-presets-desc" });
     const presetGrid = presetsBlock.createDiv({ cls: "notepack-settings-persona-preset-grid" });
     PERSONA_PRESET_ENTRIES.forEach((entry) => {
@@ -1736,7 +1750,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderWebGroundingSection(containerEl: HTMLElement, settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsWebGroundingHeading") });
+    addSettingsHeading(section, t("settingsWebGroundingHeading"));
 
     const resolved = resolveActiveChatModel(settings);
     const groundingSupported = Boolean(resolved?.model.supportsGrounding);
@@ -1759,7 +1773,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderPersonaTuningSection(containerEl: HTMLElement, settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsGenerationBehaviorHeading") });
+    addSettingsHeading(section, t("settingsGenerationBehaviorHeading"));
     section.createEl("p", { text: t("settingsGenerationBehaviorDesc") });
 
     new Setting(section)
@@ -1770,7 +1784,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         text.inputEl.min = "1";
         text.inputEl.max = "10";
         text.inputEl.step = "1";
-        text.inputEl.style.width = "5em";
+        text.inputEl.addClass("np-settings-narrow-input");
         text.setValue(String(settings.annotationMaxSentences ?? 4));
         text.onChange((value) => {
           const parsed = Math.max(1, Math.min(10, Math.round(Number(value) || 4)));
@@ -1810,7 +1824,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderVaultPathSection(containerEl: HTMLElement, settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsVaultFoldersHeading") });
+    addSettingsHeading(section, t("settingsVaultFoldersHeading"));
 
     new Setting(section)
       .setName(t("settingsPromotionFolderName"))
@@ -1848,7 +1862,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderCardDifficultyTab(containerEl: HTMLElement, settings: AISettings): void {
     const header = containerEl.createDiv({ cls: "notepack-settings-section" });
-    header.createEl("h3", { text: t("settingsCardDifficultyHeading") });
+    addSettingsHeading(header, t("settingsCardDifficultyHeading"));
     header.createEl("p", {
       cls: "notepack-settings-difficulty-isolation",
       text: t("settingsCardDifficultyIsolationNote"),
@@ -1880,10 +1894,10 @@ export class NotePackSettingTab extends PluginSettingTab {
     onSave: (value: string) => void,
   ): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section notepack-settings-difficulty-section" });
-    if (sectionTitle) section.createEl("h4", { text: sectionTitle });
+    if (sectionTitle) addSettingsHeading(section, sectionTitle, "card");
 
     const presetsBlock = section.createDiv({ cls: "notepack-settings-persona-presets" });
-    presetsBlock.createEl("h5", { text: t("settingsDifficultyPresetsLabel") });
+    addSettingsHeading(presetsBlock, t("settingsDifficultyPresetsLabel"), "sub");
     presetsBlock.createEl("p", {
       text: t("settingsDifficultyPresetHint"),
       cls: "notepack-settings-persona-presets-desc",
@@ -1934,7 +1948,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderUiLanguageSection(containerEl: HTMLElement, settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsInterfaceHeading") });
+    addSettingsHeading(section, t("settingsInterfaceHeading"));
 
     new Setting(section)
       .setName(t("settingsInterfaceLanguageName"))
@@ -1950,7 +1964,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   private renderMaintenanceSection(containerEl: HTMLElement, _settings: AISettings): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsLegacyMigrationHeading") });
+    addSettingsHeading(section, t("settingsLegacyMigrationHeading"));
 
     const migration = this.plugin.settingsStore.getData().legacyMigration;
     new Setting(section)

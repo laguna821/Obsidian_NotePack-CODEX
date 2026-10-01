@@ -6,15 +6,12 @@ import type { NativeProcessOptions, NativeProcessResult } from "./types.ts";
 type ChildProcessModule = typeof import("child_process");
 type ChildProcess = import("child_process").ChildProcess;
 
-/** Node's require, resolved lazily so mobile builds and tests never touch it. */
-export function getNodeRequire(): NodeRequire {
-  const candidate = (globalThis as { require?: NodeRequire }).require;
-  if (typeof candidate === "function") return candidate;
-  return (0, eval)("require") as NodeRequire;
-}
-
+/**
+ * Node modules are required on first use, so the plugin still loads on mobile
+ * and the unit tests never touch them. The bundle keeps this dynamic require.
+ */
 export function requireNode<T>(id: string): T {
-  return getNodeRequire()(id) as T;
+  return require(id) as T;
 }
 
 const activeChildren = new Set<ChildProcess>();

@@ -199,8 +199,7 @@ export class NotePackShell {
       event.stopPropagation();
       this.isResizingInspector = true;
       handle.addClass("np-inspector-resize-handle--active");
-      document.body.style.cursor = "ew-resize";
-      document.body.style.userSelect = "none";
+      document.body.addClass("np-is-resizing-horizontal");
 
       const startX = event.clientX;
       const startWidth = container.getBoundingClientRect().width;
@@ -216,8 +215,7 @@ export class NotePackShell {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
         handle.removeClass("np-inspector-resize-handle--active");
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
+        document.body.removeClass("np-is-resizing-horizontal");
         const finalWidth = parseInt(
           getComputedStyle(container).getPropertyValue("--np-inspector-width"),
           10,

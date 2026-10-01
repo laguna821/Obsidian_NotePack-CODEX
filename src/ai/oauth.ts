@@ -1,4 +1,5 @@
 import { Platform } from "obsidian";
+import { requireNode } from "./native/process";
 
 // OpenAI Plan (ChatGPT/Codex subscription) is the only plan connection that
 // still uses OAuth inside NotePack. Claude Plan and Gemini Plan delegate login
@@ -32,11 +33,6 @@ export interface OAuthTokenResponse {
 // or closing the dialog cancels it, so an old timer never closes a new server.
 let activeCallback: { cancel: () => Promise<void> } | undefined;
 
-function getNodeRequire(): NodeRequire {
-  const candidate = (globalThis as { require?: NodeRequire }).require;
-  if (typeof candidate === "function") return candidate;
-  return (0, eval)("require") as NodeRequire;
-}
 
 function ensureDesktopOAuth(): void {
   if (!Platform.isDesktop) {
@@ -124,7 +120,7 @@ export async function listenForOAuthCallback(options: {
 }): Promise<{ redirectUri: string; code: Promise<string> }> {
   ensureDesktopOAuth();
   await closeOAuthCallbackServer();
-  const http = getNodeRequire()("node:http") as typeof import("http");
+  const http = requireNode<typeof import("http")>("node:http");
 
   let lastError: unknown;
   for (const redirectUri of options.redirectUris) {

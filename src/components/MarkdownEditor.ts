@@ -91,7 +91,7 @@ export class MarkdownEditor {
 
     if (typeof opts.initialHeight === "number" && opts.initialHeight > 0) {
       this.manualHeight = opts.initialHeight;
-      this.textareaEl.style.height = `${opts.initialHeight}px`;
+      this.textareaEl.setCssStyles({ height: `${opts.initialHeight}px` });
     }
 
     this.bubbleEl = opts.hideBubble ? null : this.renderBubble();
@@ -136,13 +136,12 @@ export class MarkdownEditor {
       const startY = event.clientY;
       const startHeight = ta.getBoundingClientRect().height;
       handle.addClass("np-md-editor-resize--active");
-      document.body.style.cursor = "ns-resize";
-      document.body.style.userSelect = "none";
+      document.body.addClass("np-is-resizing-vertical");
 
       const onMove = (ev: PointerEvent) => {
         const delta = ev.clientY - startY;
         const next = Math.max(48, Math.min(480, startHeight + delta));
-        ta.style.height = `${next}px`;
+        ta.setCssStyles({ height: `${next}px` });
         this.manualHeight = next;
       };
       const onUp = () => {
@@ -150,8 +149,7 @@ export class MarkdownEditor {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
         handle.removeClass("np-md-editor-resize--active");
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
+        document.body.removeClass("np-is-resizing-vertical");
         if (this.manualHeight != null) {
           this.opts.onHeightChange?.(this.manualHeight);
         }
@@ -289,7 +287,7 @@ export class MarkdownEditor {
 
   private renderBubble(): HTMLElement {
     const bubble = document.body.createDiv({ cls: "np-md-bubble" });
-    bubble.style.display = "none";
+    bubble.hide();
     this.getToolButtons().slice(0, 6).forEach((spec) => {
       const button = bubble.createEl("button", {
         cls: "np-md-btn np-md-btn--bubble",
@@ -321,14 +319,14 @@ export class MarkdownEditor {
     // keep this simple — toolbar-only is the canonical UI, bubble is a hint.)
     const px = Math.round(rect.left + rect.width / 2 - 80);
     const py = Math.round(rect.top - 36 + window.scrollY);
-    this.bubbleEl.style.left = `${Math.max(8, px)}px`;
-    this.bubbleEl.style.top = `${Math.max(8, py)}px`;
-    this.bubbleEl.style.display = "flex";
+    this.bubbleEl.setCssStyles({ left: `${Math.max(8, px)}px`, top: `${Math.max(8, py)}px` });
+    // The stylesheet lays the bubble out as flex; show() only clears the hide.
+    this.bubbleEl.show();
     void cursorOffset; // referenced for clarity; positioning is best-effort
   }
 
   private hideBubble(): void {
-    if (this.bubbleEl) this.bubbleEl.style.display = "none";
+    this.bubbleEl?.hide();
   }
 
   // ── Keyboard shortcuts + Enter handling ─────────────────────────────────
@@ -420,14 +418,14 @@ export class MarkdownEditor {
     // the user's chosen height.
     if (this.manualHeight != null) {
       const max = Math.max(this.manualHeight, this.opts.autoResizeMaxPx ?? 480);
-      this.textareaEl.style.height = "auto";
+      this.textareaEl.setCssStyles({ height: "auto" });
       const next = Math.max(this.manualHeight, Math.min(this.textareaEl.scrollHeight, max));
-      this.textareaEl.style.height = `${next}px`;
+      this.textareaEl.setCssStyles({ height: `${next}px` });
       return;
     }
     const max = this.opts.autoResizeMaxPx ?? 240;
-    this.textareaEl.style.height = "auto";
-    this.textareaEl.style.height = `${Math.min(this.textareaEl.scrollHeight, max)}px`;
+    this.textareaEl.setCssStyles({ height: "auto" });
+    this.textareaEl.setCssStyles({ height: `${Math.min(this.textareaEl.scrollHeight, max)}px` });
   }
 }
 

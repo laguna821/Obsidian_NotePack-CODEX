@@ -73,7 +73,7 @@ export class BoardView {
     this.containerEl = parentEl.createDiv({ cls: "np-board" });
     this.controlsEl = this.containerEl.createDiv({ cls: "np-board-controls" });
     this.actionBarEl = this.containerEl.createDiv({ cls: "np-board-action-bar" });
-    this.actionBarEl.style.display = "none";
+    this.actionBarEl.hide();
 
     this.pinnedSectionEl = this.containerEl.createDiv({ cls: "np-board-section np-board-section--pinned" });
     const pinnedHeader = this.pinnedSectionEl.createDiv({ cls: "np-board-section-header" });
@@ -176,8 +176,8 @@ export class BoardView {
     this.gridEl.empty();
 
     const hasPinned = pinned.length > 0 && !this.trashMode;
-    this.pinnedSectionEl.style.display = hasPinned ? "" : "none";
-    this.dividerEl.style.display = hasPinned ? "" : "none";
+    this.pinnedSectionEl.toggle(hasPinned);
+    this.dividerEl.toggle(hasPinned);
 
     if (hasPinned) {
       this.pinnedHeaderCountEl.textContent = String(pinned.length);
@@ -306,7 +306,7 @@ export class BoardView {
     const selected = this.store.selectedCardIds;
     const count = selected.size;
     if (count === 0) {
-      this.actionBarEl.style.display = "none";
+      this.actionBarEl.hide();
       this.actionBarEl.empty();
       this.actionBarCountEl = null;
       this.actionBarAnnotateBtn = null;
@@ -315,7 +315,7 @@ export class BoardView {
       return;
     }
 
-    this.actionBarEl.style.display = "";
+    this.actionBarEl.show();
     this.actionBarEl.empty();
 
     this.actionBarCountEl = this.actionBarEl.createSpan({

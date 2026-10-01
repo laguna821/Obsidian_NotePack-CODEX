@@ -1,4 +1,4 @@
-# NotePack CODEX v4.0.0
+# NotePack CODEX v4.0.1
 
 <img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
 
@@ -59,7 +59,7 @@ The Korean documentation below is the canonical version maintained by the author
 | 🔐 보안 | 저장돼 있던 Claude·Gemini Plan 토큰과 내장 Google OAuth 시크릿 제거, API 키·게이트웨이 과금 경로 자동 차단 |
 | 🛑 취소 | 카드 팩·통합 인사이트 생성 중 창을 닫으면 요청과 CLI 프로세스도 함께 중단 |
 
-> 자세한 내용은 [RELEASE_NOTES_4.0.0.md](RELEASE_NOTES_4.0.0.md), 연결 방법은 아래 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 보세요.
+> 자세한 내용은 [RELEASE_NOTES_4.0.0.md](RELEASE_NOTES_4.0.0.md), 연결 방법은 아래 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 보세요. 4.0.1은 Obsidian 커뮤니티 심사 규칙에 맞춘 정리 릴리즈입니다([RELEASE_NOTES_4.0.1.md](RELEASE_NOTES_4.0.1.md)).
 
 ---
 
@@ -318,7 +318,7 @@ v1.x는 AI 호출에 어떤 throttle도 없어 카드 다발 입력 시 quota �
 
 ## 📦 설치
 
-[GitHub Releases](https://github.com/laguna821/Obsidian_NotePack-CODEX/releases)에서 **v4.0.0**의 `main.js` / `manifest.json` / `styles.css` 3개 파일을 받아 `<vault>/.obsidian/plugins/achmage-notepack-codex/`에 넣기 → 옵시디언 Settings → 커뮤니티 플러그인 → 활성화.
+옵시디언 Settings → 커뮤니티 플러그인에서 **NotePack CODEX**를 검색해 설치·업데이트하는 것이 가장 간단합니다. 직접 설치하려면 [GitHub Releases](https://github.com/laguna821/Obsidian_NotePack-CODEX/releases)에서 최신 릴리즈의 `main.js` / `manifest.json` / `styles.css` 3개 파일을 받아 `<vault>/.obsidian/plugins/achmage-notepack-codex/`에 넣기 → 옵시디언 Settings → 커뮤니티 플러그인 → 활성화.
 
 Claude·Gemini Plan을 쓰려면 위 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절의 준비 단계(Claude Code / Antigravity CLI 설치와 로그인)를 함께 진행하세요.
 

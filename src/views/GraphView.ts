@@ -193,17 +193,13 @@ export class GraphView {
       circle.setAttribute("r", String(node.radius));
 
       if (node.card.rarity) {
-        circle.style.fill = RARITY_COLORS[node.card.rarity];
+        circle.setCssStyles({ fill: RARITY_COLORS[node.card.rarity] });
       } else if (node.card.status === "error") {
-        circle.style.fill = "#f28b82";
-        circle.style.stroke = "#dc2626";
-        circle.style.strokeWidth = "2";
+        circle.setCssStyles({ fill: "#f28b82", stroke: "#dc2626", strokeWidth: "2" });
       } else if (node.card.status === "enriching") {
-        circle.style.fill = "#fdd663";
-        circle.style.stroke = "#d97706";
-        circle.style.strokeWidth = "2";
+        circle.setCssStyles({ fill: "#fdd663", stroke: "#d97706", strokeWidth: "2" });
       } else {
-        circle.style.fill = "#c7d2fe";
+        circle.setCssStyles({ fill: "#c7d2fe" });
       }
 
       g.appendChild(circle);
@@ -217,7 +213,7 @@ export class GraphView {
       g.appendChild(text);
 
       g.addEventListener("click", () => this.onClick(node.id));
-      g.style.cursor = "pointer";
+      g.setCssStyles({ cursor: "pointer" });
 
       this.svgEl!.appendChild(g);
     });

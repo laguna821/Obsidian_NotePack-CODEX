@@ -3259,3 +3259,46 @@
   border-color: var(--np-accent, var(--np-text));
   color: var(--np-text);
 }
+
+/* Settings headings rendered with Setting().setHeading() (Obsidian review). */
+.notepack-settings .setting-item.np-settings-heading {
+  padding: 0;
+  margin: 0 0 8px;
+  border: none;
+}
+
+.notepack-settings .np-settings-heading .setting-item-name {
+  font-weight: 600;
+}
+
+.notepack-settings .np-settings-heading--card .setting-item-name {
+  font-size: 14px;
+}
+
+.notepack-settings .np-settings-heading--sub {
+  margin-bottom: 4px;
+}
+
+.notepack-settings .np-settings-heading--sub .setting-item-name {
+  font-size: 13px;
+}
+
+.notepack-settings-agent-card-header .setting-item.np-settings-heading {
+  flex: 1;
+  margin: 0;
+}
+
+.np-settings-narrow-input {
+  width: 5em;
+}
+
+/* Resize drags set these on <body> instead of inline styles. */
+body.np-is-resizing-vertical {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+body.np-is-resizing-horizontal {
+  cursor: ew-resize;
+  user-select: none;
+}

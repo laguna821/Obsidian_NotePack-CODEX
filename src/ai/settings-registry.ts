@@ -12,10 +12,6 @@ import type {
 import { createDefaultAnnotationAgents, normalizeAnnotationAgents } from "./personas.ts";
 import { isRetiredModelId, replaceRetiredModelId } from "./model-retirement.ts";
 
-type Mutable<T> = {
-  -readonly [K in keyof T]: T[K];
-};
-
 const PROVIDER_DEFINITIONS: Record<AIProviderType, AIProviderDefinition> = {
   "anthropic-plan": {
     type: "anthropic-plan",
@@ -628,17 +624,16 @@ function findLegacyModelId(providerType: LegacyAIProvider, modelId?: string): st
   return models[0]?.id ?? DEFAULT_CHAT_MODELS[0]?.id ?? "";
 }
 
+function isCurrentAISettings(candidate: Partial<LegacyAISettings> | AISettings): candidate is AISettings {
+  return "providers" in candidate && Array.isArray(candidate.providers) && "chatModels" in candidate;
+}
+
 export function migrateLegacyAISettings(candidate?: Partial<LegacyAISettings> | AISettings): AISettings {
-  if (
-    candidate &&
-    "providers" in candidate &&
-    Array.isArray((candidate as AISettings).providers) &&
-    "chatModels" in candidate
-  ) {
-    return normalizeAISettings(candidate as AISettings);
+  if (candidate && isCurrentAISettings(candidate)) {
+    return normalizeAISettings(candidate);
   }
 
-  const legacy = candidate as Partial<LegacyAISettings> | undefined;
+  const legacy = candidate;
   const migrated = createDefaultAISettings();
   const providerType = legacy?.provider ?? "openrouter";
 

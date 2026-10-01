@@ -20,7 +20,7 @@ export class ComposerExpandModal extends Modal {
   private editor: MarkdownEditor | null = null;
   private previewEl: HTMLElement | null = null;
   private previewComponent: Component | null = null;
-  private previewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private previewDebounceTimer: number | null = null;
   private dismissedBySubmit = false;
 
   constructor(app: App, initialText: string, callbacks: ComposerExpandModalCallbacks) {
@@ -86,7 +86,7 @@ export class ComposerExpandModal extends Modal {
     });
 
     this.renderPreview();
-    setTimeout(() => this.editor?.focus(), 0);
+    window.setTimeout(() => this.editor?.focus(), 0);
   }
 
   private submit(): void {
@@ -98,8 +98,8 @@ export class ComposerExpandModal extends Modal {
   }
 
   private schedulePreviewUpdate(): void {
-    if (this.previewDebounceTimer) clearTimeout(this.previewDebounceTimer);
-    this.previewDebounceTimer = setTimeout(() => {
+    if (this.previewDebounceTimer) window.clearTimeout(this.previewDebounceTimer);
+    this.previewDebounceTimer = window.setTimeout(() => {
       this.previewDebounceTimer = null;
       this.renderPreview();
     }, 150);
@@ -128,7 +128,7 @@ export class ComposerExpandModal extends Modal {
 
   onClose(): void {
     if (this.previewDebounceTimer) {
-      clearTimeout(this.previewDebounceTimer);
+      window.clearTimeout(this.previewDebounceTimer);
       this.previewDebounceTimer = null;
     }
     this.previewComponent?.unload();

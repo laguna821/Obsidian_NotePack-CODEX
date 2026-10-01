@@ -32,12 +32,12 @@ export function combineAgyPrompt(systemPrompt: string, prompt: string): string {
 export function extractAntigravityTextDelta(event: Record<string, unknown>): string {
   if (event.type !== "step_update" && event.event !== "step_update") return "";
   for (const key of ["delta", "text", "content", "output"]) {
-    if (typeof event[key] === "string") return event[key] as string;
+    if (typeof event[key] === "string") return event[key];
   }
   const step = asRecord(event.step_update ?? event.step);
   if (step) {
     for (const key of ["delta", "text", "content", "output", "text_delta"]) {
-      if (typeof step[key] === "string") return step[key] as string;
+      if (typeof step[key] === "string") return step[key];
     }
   }
   return "";

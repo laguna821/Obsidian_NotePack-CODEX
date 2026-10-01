@@ -9,7 +9,6 @@ import {
   type ChatCompletionOptions,
   type ChatMessage,
 } from "./request-shapes";
-import { buildAIConfig } from "./settings-registry";
 import {
   buildOpenAIPlanCodexRequestBody,
   createOpenAIPlanHeaders,
@@ -27,10 +26,24 @@ function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-function generatePromptId(): string {
-  const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
-  return `np-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+// Response bodies as the providers document them; every field is optional
+// because a proxy or an error page can return something else.
+interface OpenAICompatibleResponse {
+  choices?: Array<{ message?: { content?: unknown; annotations?: unknown[] } }>;
+}
+
+interface AnthropicMessageResponse {
+  stop_reason?: string;
+  content?: Array<{ type?: string; text?: string }>;
+}
+
+interface GeminiResponse {
+  text?: string;
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
+    citationMetadata?: { citationSources?: Array<{ uri?: string }> };
+  }>;
 }
 
 function truncateErrorBody(text: string): string {
@@ -243,7 +256,7 @@ async function callOpenAICompatibleChatCompletion(
     return result;
   });
 
-  const data = response.json;
+  const data = response.json as OpenAICompatibleResponse | undefined;
   const choice = data?.choices?.[0];
   const content = normalizeMessageContent(choice?.message?.content);
 
@@ -293,13 +306,14 @@ async function callAnthropicChatCompletion(
     return result;
   });
 
-  const data = response.json;
+  const data = response.json as AnthropicMessageResponse | undefined;
   if (data?.stop_reason === "refusal") {
     throw new Error("Claude declined this request (refusal). Rephrase the content or choose another model.");
   }
-  const content = Array.isArray(data?.content)
-    ? data.content
-        .map((item: { type?: string; text?: string }) => (item?.type === "text" ? item.text || "" : ""))
+  const blocks = data?.content;
+  const content = Array.isArray(blocks)
+    ? blocks
+        .map((item) => (item?.type === "text" ? item.text || "" : ""))
         .join("\n")
         .trim()
     : "";
@@ -411,7 +425,7 @@ function getGeminiResponseJsonSchema(options: ChatCompletionOptions): Record<str
   const responseFormat = options.response_format;
   if (!responseFormat || responseFormat.type !== "json_schema") return undefined;
 
-  const formatRecord = responseFormat as Record<string, unknown>;
+  const formatRecord = responseFormat;
   const schemaWrapper = formatRecord.json_schema;
   if (!schemaWrapper || typeof schemaWrapper !== "object" || Array.isArray(schemaWrapper)) {
     return undefined;
@@ -458,24 +472,26 @@ function buildGeminiGenerationConfig(
   return Object.keys(generationConfig).length > 0 ? generationConfig : undefined;
 }
 
-function extractGeminiText(data: any): string {
+function extractGeminiText(data: GeminiResponse | undefined): string {
   const candidate = data?.candidates?.[0];
-  const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
-  const text = parts
-    .map((part: { text?: string }) => part?.text || "")
+  const parts = candidate?.content?.parts;
+  const text = (Array.isArray(parts) ? parts : [])
+    .map((part) => part?.text || "")
     .join("\n")
     .trim();
 
   return text || data?.text || "";
 }
 
-function extractGeminiAnnotations(data: any): Array<{ type: string; url_citation: { url: string; title?: string } }> {
+function extractGeminiAnnotations(
+  data: GeminiResponse | undefined,
+): Array<{ type: string; url_citation: { url: string; title?: string } }> {
   const annotations: Array<{ type: string; url_citation: { url: string; title?: string } }> = [];
   const candidate = data?.candidates?.[0];
   const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
 
   if (Array.isArray(groundingChunks)) {
-    groundingChunks.forEach((chunk: any) => {
+    groundingChunks.forEach((chunk) => {
       const uri = chunk?.web?.uri;
       if (!uri) return;
       annotations.push({
@@ -490,7 +506,7 @@ function extractGeminiAnnotations(data: any): Array<{ type: string; url_citation
 
   const citationSources = candidate?.citationMetadata?.citationSources;
   if (Array.isArray(citationSources)) {
-    citationSources.forEach((source: any) => {
+    citationSources.forEach((source) => {
       if (!source?.uri) return;
       annotations.push({
         type: "url_citation",
@@ -549,7 +565,7 @@ async function callGeminiChatCompletion(
     return result;
   });
 
-  const data = response.json;
+  const data = response.json as GeminiResponse | undefined;
   const content = extractGeminiText(data);
   if (!content) {
     throw new Error("No content in Gemini response");

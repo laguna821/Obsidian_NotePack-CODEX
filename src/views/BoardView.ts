@@ -118,7 +118,7 @@ export class BoardView {
   }
 
   applyTileSize(): void {
-    const preset = (this.store.localSettings.cardSize ?? "M") as CardSizePreset;
+    const preset = this.store.localSettings.cardSize ?? "M";
     const px = TILE_SIZE_PX[preset] ?? TILE_SIZE_PX.M;
     const lines = TILE_TEXT_LINES[preset] ?? TILE_TEXT_LINES.M;
     this.containerEl.style.setProperty("--np-tile-size", `${px}px`);
@@ -127,7 +127,7 @@ export class BoardView {
 
   applyLocalSettings(): void {
     this.applyTileSize();
-    const current = (this.store.localSettings.cardSize ?? "M") as CardSizePreset;
+    const current = this.store.localSettings.cardSize ?? "M";
     this.controlsEl.querySelectorAll<HTMLButtonElement>(".np-board-size-btn").forEach((btn) => {
       btn.classList.toggle("np-board-size-btn--active", btn.textContent === current);
     });
@@ -265,7 +265,7 @@ export class BoardView {
     const sizeGroup = this.controlsEl.createDiv({ cls: "np-board-control-group np-board-size-group" });
     sizeGroup.createSpan({ cls: "np-board-control-label", text: t("cardSizeLabel") });
     const segmented = sizeGroup.createDiv({ cls: "np-board-size-segmented" });
-    const currentSize = (this.store.localSettings.cardSize ?? "M") as CardSizePreset;
+    const currentSize = this.store.localSettings.cardSize ?? "M";
     SIZE_ORDER.forEach((preset) => {
       const btn = segmented.createEl("button", {
         cls: `np-board-size-btn${preset === currentSize ? " np-board-size-btn--active" : ""}`,

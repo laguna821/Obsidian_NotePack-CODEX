@@ -268,6 +268,7 @@ interface TranslationSet {
   bulkAnnotateConfirm: string;
   bulkAnnotateDone: string;
   bulkAnnotateRetryFailed: string;
+  confirmCancel: string;
   bulkDrawPack: string;
   packMultiSeedLabel: string;
   packSeedNotReady: string;
@@ -554,6 +555,7 @@ const ko: TranslationSet = {
   bulkAnnotateConfirm: "{n}개 카드에 AI 주석을 추가합니다. 계속할까요?",
   bulkAnnotateDone: "{done}개 완료, {failed}개 실패",
   bulkAnnotateRetryFailed: "실패 {n}개 재시도",
+  confirmCancel: "취소",
   bulkDrawPack: "선택 시드로 카드 팩",
   packMultiSeedLabel: "{n}개 시드",
   packSeedNotReady: "시드 카드가 모두 ready 상태여야 합니다",
@@ -840,6 +842,7 @@ const en: TranslationSet = {
   bulkAnnotateConfirm: "Annotate {n} cards with AI?",
   bulkAnnotateDone: "{done} done, {failed} failed",
   bulkAnnotateRetryFailed: "Retry failed ({n})",
+  confirmCancel: "Cancel",
   bulkDrawPack: "Draw pack from seeds",
   packMultiSeedLabel: "{n} seeds",
   packSeedNotReady: "All seed cards must be ready",

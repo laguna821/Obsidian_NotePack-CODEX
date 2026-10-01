@@ -80,7 +80,7 @@ export class GraphView {
 
     this.buildGraph();
 
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const svg = createSvg("svg");
     svg.setAttribute("width", "100%");
     svg.setAttribute("height", "100%");
     svg.setAttribute("viewBox", `0 0 ${this.width} ${this.height}`);
@@ -155,7 +155,7 @@ export class GraphView {
     this.iterations += 1;
 
     if (this.iterations < this.maxIterations) {
-      this.animFrame = requestAnimationFrame(() => this.simulate());
+      this.animFrame = window.requestAnimationFrame(() => this.simulate());
     } else {
       this.drawFinal();
     }
@@ -173,7 +173,7 @@ export class GraphView {
       const b = nodeMap.get(edge.target);
       if (!a || !b) return;
 
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      const line = createSvg("line");
       line.setAttribute("x1", String(a.x));
       line.setAttribute("y1", String(a.y));
       line.setAttribute("x2", String(b.x));
@@ -183,11 +183,11 @@ export class GraphView {
     });
 
     this.nodes.forEach((node) => {
-      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const g = createSvg("g");
       g.classList.add("np-graph-node");
       if (node.id === selectedId) g.classList.add("np-graph-node--selected");
 
-      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      const circle = createSvg("circle");
       circle.setAttribute("cx", String(node.x));
       circle.setAttribute("cy", String(node.y));
       circle.setAttribute("r", String(node.radius));
@@ -204,7 +204,7 @@ export class GraphView {
 
       g.appendChild(circle);
 
-      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      const text = createSvg("text");
       text.setAttribute("x", String(node.x));
       text.setAttribute("y", String(node.y + node.radius + 14));
       text.classList.add("np-graph-label");

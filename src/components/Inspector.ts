@@ -252,7 +252,7 @@ export class Inspector {
       }
     });
 
-    setTimeout(() => this.editor?.focus(), 0);
+    window.setTimeout(() => this.editor?.focus(), 0);
   }
 
   private renderEnrichmentSection(card: WorkbenchCard): void {

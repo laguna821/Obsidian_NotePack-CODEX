@@ -57,7 +57,7 @@ export class MarkdownEditor {
   private readonly onSelectionChange: () => void;
   private readonly onWindowMouseDown: (e: MouseEvent) => void;
   private previewComponent: Component | null = null;
-  private previewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private previewDebounceTimer: number | null = null;
   private manualHeight: number | null = null;
   private destroyed = false;
 
@@ -117,7 +117,7 @@ export class MarkdownEditor {
     this.textareaEl.addEventListener("mouseup", this.onSelectionChange);
     this.textareaEl.addEventListener("blur", () => {
       // Delay so a bubble click can still resolve
-      setTimeout(() => this.hideBubble(), 100);
+      window.setTimeout(() => this.hideBubble(), 100);
     });
     document.addEventListener("selectionchange", this.onSelectionChange);
     window.addEventListener("mousedown", this.onWindowMouseDown);
@@ -163,7 +163,7 @@ export class MarkdownEditor {
   private schedulePreviewUpdate(immediate = false): void {
     if (!this.previewEl || !this.opts.app || !this.previewComponent) return;
     if (this.previewDebounceTimer) {
-      clearTimeout(this.previewDebounceTimer);
+      window.clearTimeout(this.previewDebounceTimer);
       this.previewDebounceTimer = null;
     }
     const run = () => {
@@ -171,7 +171,7 @@ export class MarkdownEditor {
       this.renderPreview();
     };
     if (immediate) run();
-    else this.previewDebounceTimer = setTimeout(run, 150);
+    else this.previewDebounceTimer = window.setTimeout(run, 150);
   }
 
   private renderPreview(): void {
@@ -219,7 +219,7 @@ export class MarkdownEditor {
     document.removeEventListener("selectionchange", this.onSelectionChange);
     window.removeEventListener("mousedown", this.onWindowMouseDown);
     if (this.previewDebounceTimer) {
-      clearTimeout(this.previewDebounceTimer);
+      window.clearTimeout(this.previewDebounceTimer);
       this.previewDebounceTimer = null;
     }
     this.previewComponent?.unload();

@@ -1,7 +1,7 @@
 // ── PackCardElement: Individual Pack Card in Modal ────────────────────────
 
-import type { PackCard, Rarity } from "../types";
-import { RARITY_COLORS, RARITY_LABELS, RARITY_EFFECT_TEXT } from "../types";
+import type { PackCard } from "../types";
+import { RARITY_COLORS } from "../types";
 import { t } from "../i18n";
 
 export class PackCardElement {
@@ -19,7 +19,7 @@ export class PackCardElement {
     this.card = card;
     this.onKeep = onKeep;
     this.onDiscard = onDiscard;
-    this.el = document.createElement("div");
+    this.el = createDiv();
     this.render();
   }
 

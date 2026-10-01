@@ -1,4 +1,4 @@
-import { Platform } from "obsidian";
+import { Platform, requestUrl } from "obsidian";
 import { requireNode } from "./native/process";
 
 // OpenAI Plan (ChatGPT/Codex subscription) is the only plan connection that
@@ -135,7 +135,7 @@ export async function listenForOAuthCallback(options: {
     code.catch(() => undefined);
 
     let settled = false;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timeout: number | undefined;
     let closed: Promise<void> = Promise.resolve();
     const flow = {
       cancel: () => {
@@ -148,7 +148,7 @@ export async function listenForOAuthCallback(options: {
     const settle = (error?: Error, value?: string) => {
       if (settled) return;
       settled = true;
-      if (timeout) clearTimeout(timeout);
+      if (timeout) window.clearTimeout(timeout);
       if (activeCallback === flow) activeCallback = undefined;
       closed = shutDownServer(server);
       if (error) rejectCode(error);
@@ -205,7 +205,7 @@ export async function listenForOAuthCallback(options: {
 
     activeCallback = flow;
     server.on("error", (error) => settle(error instanceof Error ? error : new Error("OAuth callback server error.")));
-    timeout = setTimeout(
+    timeout = window.setTimeout(
       () => settle(new Error("OAuth callback timed out. Try the login flow again.")),
       options.timeoutMs ?? CALLBACK_TIMEOUT_MS,
     );
@@ -218,19 +218,20 @@ export async function listenForOAuthCallback(options: {
 }
 
 async function postForm(url: string, body: Record<string, string>): Promise<OAuthTokenResponse> {
-  const response = await fetch(url, {
+  // requestUrl goes through Obsidian, so the token endpoint needs no CORS headers.
+  const response = await requestUrl({
+    url,
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+    contentType: "application/x-www-form-urlencoded",
     body: new URLSearchParams(body).toString(),
+    throw: false,
   });
 
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${await response.text()}`);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Request failed: ${response.status} ${response.text}`);
   }
 
-  return response.json() as Promise<OAuthTokenResponse>;
+  return response.json as OAuthTokenResponse;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | undefined {

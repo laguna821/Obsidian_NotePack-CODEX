@@ -1,4 +1,4 @@
-# NotePack CODEX v4.0.2
+# NotePack CODEX v4.0.3
 
 <img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
 
@@ -17,6 +17,8 @@ Key features:
 - **Quantum metacognition cardpacks** — five rarity tiers tuned by your set grade level.
 
 NotePack CODEX operates on `.codex` files inside your vault, kept separate from regular markdown so the AI-enriched workbench does not pollute your notes. Promote favorite cards into proper markdown notes when they are ready.
+
+The Claude and Gemini Plan connections run only the official CLIs you installed yourself. [SECURITY.md](SECURITY.md) lists every command the plugin runs and what it stores.
 
 The Korean documentation below is the canonical version maintained by the author.
 
@@ -59,7 +61,7 @@ The Korean documentation below is the canonical version maintained by the author
 | 🔐 보안 | 저장돼 있던 Claude·Gemini Plan 토큰과 내장 Google OAuth 시크릿 제거, API 키·게이트웨이 과금 경로 자동 차단 |
 | 🛑 취소 | 카드 팩·통합 인사이트 생성 중 창을 닫으면 요청과 CLI 프로세스도 함께 중단 |
 
-> 자세한 내용은 [RELEASE_NOTES_4.0.0.md](RELEASE_NOTES_4.0.0.md), 연결 방법은 아래 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 보세요. 4.0.1과 4.0.2는 Obsidian 커뮤니티 심사 규칙에 맞춘 정리 릴리즈입니다([RELEASE_NOTES_4.0.1.md](RELEASE_NOTES_4.0.1.md), [RELEASE_NOTES_4.0.2.md](RELEASE_NOTES_4.0.2.md)). 4.0.2부터 Obsidian 1.7.2 이상이 필요합니다.
+> 자세한 내용은 [RELEASE_NOTES_4.0.0.md](RELEASE_NOTES_4.0.0.md), 연결 방법은 아래 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 보세요. 4.0.1~4.0.3은 Obsidian 커뮤니티 심사 규칙에 맞춘 정리 릴리즈입니다([4.0.1](RELEASE_NOTES_4.0.1.md), [4.0.2](RELEASE_NOTES_4.0.2.md), [4.0.3](RELEASE_NOTES_4.0.3.md)). 4.0.3부터 Obsidian 1.8.7 이상이 필요하고, Obsidian 1.13 이상에서는 설정이 연결·페르소나·카드 난이도·일반 네 페이지로 나뉘어 설정 검색에 잡힙니다. 전체 변경 이력은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
 
 ---
 
@@ -222,7 +224,7 @@ Inspector의 **"별도 창"** 버튼으로 한 카드를 옵시디언 별도 윈
 | 옵시디언 기본 file-explorer | ✅ 폴더·빈 영역 모두 |
 | [Notebook Navigator](https://github.com/johansan/notebook-navigator) | ✅ 폴더·빈 영역 모두 (v2.0.0에서 DOM hook 우회로 지원) |
 | 기타 file-tree plugin | 표준 file-menu 이벤트 emit하면 자동 호환, 자체 메뉴 빌드해도 DOM 기반 폴백으로 대부분 잡음 |
-| **항상 동작하는 fallback** | 명령 팔레트 `Ctrl+P` → "Create new NotePack CODEX workbench" / 좌측 ribbon `layers` 아이콘 |
+| **항상 동작하는 fallback** | 명령 팔레트 `Ctrl+P` → "NotePack CODEX: Create new workbench" / 좌측 ribbon `layers` 아이콘 |
 
 ---
 
@@ -237,6 +239,8 @@ Inspector의 **"별도 창"** 버튼으로 한 카드를 옵시디언 별도 윈
 | **OpenAI Plan** (ChatGPT 구독) | 브라우저 로그인 (Codex OAuth, PKCE) | **GPT-6.1 Sol**, GPT-6 Sol, GPT-6 Astra, GPT-6 Luna, GPT-5.6 Sol |
 | **Claude Plan** (Claude Pro·Max, 허용 시 Team·Enterprise) | 이 컴퓨터에 설치한 **Claude Code** | Sonnet·Opus·Haiku·Fable 최신(latest), Opus 5.5, Sonnet 5.5, Fable 5.1 |
 | **Gemini Plan** (Google 계정) | 이 컴퓨터에 설치한 **Antigravity CLI (`agy`)** | Gemini 3.1 Pro (High), Gemini 3.8 Flash (Medium), 연결 확인 때 발견된 Gemini 모델 |
+
+> 아래의 "설정 → 플랜 연결"은 Obsidian 1.13 이상에서 **설정 → NotePack CODEX → 연결** 페이지에 있습니다.
 
 **OpenAI Plan 연결**
 
@@ -257,7 +261,7 @@ GPT-5.6 Sol은 이 연결 경로에서 동작이 확인된 모델이고, OpenAI 
 
 조직 계정은 기본적으로 막혀 있습니다. 조직 관리자가 적용한 Claude Code 설정(hooks, 환경 변수, 권한, MCP 서버 등)이 NotePack 요청에도 적용될 수 있기 때문입니다. Claude 카드의 **Team/Enterprise 계정 허용…** 버튼에서 고지를 확인하고 허용하면 그 컴퓨터에서 쓸 수 있습니다.
 
-- 허용 여부는 동기화되는 vault 설정이 아니라 **각 컴퓨터에 따로** 저장되고, 언제든 해제할 수 있습니다.
+- 허용 여부는 동기화되는 vault 설정이 아니라 **각 컴퓨터의 vault마다 따로** 저장되고, 언제든 해제할 수 있습니다. 4.0.2 이하에서 4.0.3으로 올리면 한 번 다시 허용해야 합니다.
 - 사용량은 조직 좌석과 조직의 추가 사용량 정책을 따릅니다. 예를 들어 Team Standard 좌석에서 Fable은 사용량 크레딧으로만 동작합니다.
 - 허용한 조직 계정이라도 Claude Code가 세션 설정을 보고하지 않거나 MCP 서버가 붙으면 그 응답은 버립니다.
 
@@ -369,7 +373,7 @@ NotePack CODEX는 사용자가 선택한 AI 제공자(OpenAI, Anthropic, Gemini,
 
 - Claude Plan·Gemini Plan 요청은 이 컴퓨터에 설치된 Claude Code·Antigravity CLI가 보냅니다. 요청 내용은 각 서비스의 약관과 데이터 정책을 따르고, 조직 계정이면 조직의 보존·감사 정책이 적용될 수 있습니다.
 - NotePack은 Claude·Google 로그인 토큰을 읽거나 저장하지 않습니다. 연결 확인 때는 `claude auth status`의 계정 종류 항목, 과금 관련 환경 변수의 **이름**, 관리 설정 파일·정책이 있는지 여부만 확인하고, 이메일·조직 ID·토큰 값은 기록하지 않습니다.
-- Team/Enterprise 허용 여부와 실행 파일 경로는 그 컴퓨터의 Obsidian 로컬 저장소에만 저장되고 동기화되지 않습니다.
+- Team/Enterprise 허용 여부와 실행 파일 경로는 그 컴퓨터의 Obsidian 로컬 저장소에 vault별로 저장되고 동기화되지 않습니다. 4.0.3부터 Obsidian의 로컬 저장소 API(`app.saveLocalStorage`)를 쓰므로, 4.0.2 이하에서 올라오면 한 번 다시 설정해야 합니다.
 - OpenAI Plan 토큰은 이전과 같이 플러그인 설정(`data.json`)에 저장됩니다. vault를 동기화하면 이 파일도 함께 동기화됩니다.
 
 

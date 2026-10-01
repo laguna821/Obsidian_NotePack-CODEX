@@ -1,4 +1,15 @@
-import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
+import {
+  App,
+  Modal,
+  Notice,
+  Platform,
+  PluginSettingTab,
+  Setting,
+  requireApiVersion,
+  type SettingDefinitionGroup,
+  type SettingDefinitionItem,
+  type SettingDefinitionRender,
+} from "obsidian";
 import type NotePackPlugin from "../main";
 import { setLanguage, t } from "./i18n";
 import {
@@ -42,6 +53,7 @@ import {
   parseOAuthParam,
 } from "./ai/oauth";
 import { getNativeRuntime } from "./ai/native/runtime";
+import { confirmAction } from "./components/ConfirmModal";
 import type { NativeRuntimeProvider, NativeRuntimeSnapshot } from "./ai/native/types";
 import type {
   AIChatModel,
@@ -122,17 +134,6 @@ function buildProviderOptions(): AIProviderType[] {
   return getProviderDefinitions()
     .map((definition) => definition.type)
     .filter((type) => !isPlanProviderType(type));
-}
-
-function describeModelCapabilities(model: AIChatModel): string {
-  const caps: string[] = [];
-  if (model.supportsGrounding) caps.push("grounding");
-  if (model.supportsJsonSchema) caps.push("json-schema");
-  if (model.supportsJsonObject ?? true) caps.push("json-object");
-  if (model.supportsAnnotations) caps.push("annotations");
-  if (model.reasoning?.enabled) caps.push(`reasoning:${model.reasoning.reasoning_effort ?? "medium"}`);
-  if (model.thinking?.enabled) caps.push(`thinking:${model.thinking.budget_tokens ?? "default"}`);
-  return caps.length > 0 ? caps.join(", ") : "basic";
 }
 
 function languageModeToSettingValue(
@@ -258,7 +259,7 @@ class ProviderModal extends Modal {
       });
 
     if (!this.provider && this.providerIdLocked) {
-      providerIdSetting.descEl.createEl("div", {
+      providerIdSetting.descEl.createDiv({
         text: t("settingsProviderIdLockedHint"),
         cls: "notepack-modal-provider-id-locked-hint",
       });
@@ -380,7 +381,7 @@ class ProviderModal extends Modal {
         const row = section.createDiv({ cls: "notepack-modal-model-row" });
         const info = row.createDiv({ cls: "notepack-modal-model-row-info" });
         info.createEl("strong", { text: model.label });
-        info.createEl("span", { text: model.model });
+        info.createSpan({ text: model.model });
 
         const actions = row.createDiv({ cls: "notepack-modal-model-row-actions" });
         actions.createEl("button", { text: t("settingsEditBtn") }).addEventListener("click", () => {
@@ -952,56 +953,241 @@ function runtimeStatusLabel(snapshot: NativeRuntimeSnapshot): string {
 
 type SettingsTabId = "setup" | "persona" | "card-difficulty" | "general";
 
+/** Paints one settings section into a container. */
+type SectionPainter = (containerEl: HTMLElement, settings: AISettings) => void;
+
+/**
+ * A section painted into one row of Obsidian's declarative settings (1.13+).
+ * Runtime status subscriptions made while painting belong to the mount.
+ */
+interface SectionMount {
+  el: HTMLElement;
+  paint: SectionPainter;
+  subscriptions: Array<() => void>;
+}
+
+// Extra terms for Obsidian's settings search, in both interface languages.
+const SECTION_ALIASES = {
+  overview: ["model", "모델", "status", "상태"],
+  plan: [
+    "Claude", "Claude Code", "Gemini", "Antigravity", "ChatGPT", "Codex", "OpenAI",
+    "plan", "구독", "login", "로그인", "Team", "Enterprise",
+  ],
+  providers: [
+    "API key", "API 키", "Anthropic", "OpenAI", "Gemini", "OpenRouter", "xAI", "Grok", "DeepSeek",
+    "provider", "프로바이더", "model", "모델",
+  ],
+  webGrounding: ["web search", "웹 검색", "grounding"],
+  agents: ["persona", "페르소나", "agent", "에이전트", "annotation", "주석", "language", "언어"],
+  generation: ["sentences", "문장", "exploration", "pity"],
+  difficulty: ["difficulty", "난이도", "prompt", "프롬프트", "preset", "프리셋"],
+  folders: ["folder", "폴더", "author", "작성자", "workbench", "워크벤치"],
+  interface: ["language", "언어", "Korean", "English", "한국어"],
+  migration: ["migration", "마이그레이션", "legacy"],
+};
+
 export class NotePackSettingTab extends PluginSettingTab {
   private readonly plugin: NotePackPlugin;
   private activeTab: SettingsTabId = "setup";
   private activePersonaTab = 0;
-  private runtimeSubscriptions: Array<() => void> = [];
   private visible = false;
+  // Page names and group headings still show the previous language.
+  private labelsStale = false;
+  private readonly mounts = new Set<SectionMount>();
+  private readonly tabSubscriptions: Array<() => void> = [];
+  // Receives the status subscriptions of the section being painted.
+  private subscriptionTarget: Array<() => void> = [];
 
   constructor(app: App, plugin: NotePackPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
 
+  /**
+   * Obsidian 1.13+ renders these definitions instead of calling display().
+   * The four tabs become pages, and each section paints into one row, so the
+   * sections show up in Obsidian's settings search.
+   */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        type: "group",
+        heading: t("settingsAiRuntime"),
+        items: [
+          this.sectionRow(t("settingsActiveModel"), SECTION_ALIASES.overview, (el, settings) =>
+            this.renderOverview(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabSetup"),
+        items: [
+          this.sectionGroup(t("settingsPlanConnections"), SECTION_ALIASES.plan, (el, settings) =>
+            this.renderPlanSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsApiKeyProviders"), SECTION_ALIASES.providers, (el, settings) =>
+            this.renderProviderSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsWebGroundingHeading"), SECTION_ALIASES.webGrounding, (el, settings) =>
+            this.renderWebGroundingSection(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabPersona"),
+        items: [
+          this.sectionGroup(t("settingsAnnotationAgentsHeading"), SECTION_ALIASES.agents, (el, settings) =>
+            this.renderAnnotationSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsGenerationBehaviorHeading"), SECTION_ALIASES.generation, (el, settings) =>
+            this.renderPersonaTuningSection(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabCardDifficulty"),
+        items: [
+          this.sectionGroup(t("settingsCardDifficultyHeading"), SECTION_ALIASES.difficulty, (el, settings) =>
+            this.renderCardDifficultyTab(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabGeneral"),
+        items: [
+          this.sectionGroup(t("settingsVaultFoldersHeading"), SECTION_ALIASES.folders, (el, settings) =>
+            this.renderVaultPathSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsInterfaceHeading"), SECTION_ALIASES.interface, (el, settings) =>
+            this.renderUiLanguageSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsLegacyMigrationHeading"), SECTION_ALIASES.migration, (el, settings) =>
+            this.renderMaintenanceSection(el, settings, false),
+          ),
+        ],
+      },
+    ];
+  }
+
+  /** Obsidian before 1.13 calls display() and gets the tabbed page. */
   display(): void {
+    this.renderTabs();
+  }
+
+  hide(): void {
+    // Labels come from getSettingDefinitions(). Reload them while the tab
+    // closes: update() empties a page that is still open.
+    if (requireApiVersion("1.13.0") && this.labelsStale) {
+      this.labelsStale = false;
+      this.update();
+    }
+    this.visible = false;
+    this.releaseSubscriptions(this.tabSubscriptions);
+    for (const mount of Array.from(this.mounts)) this.unmount(mount);
+    super.hide();
+  }
+
+  private renderTabs(): void {
     const { containerEl } = this;
     const settings = this.plugin.settingsStore.settings;
-    this.clearRuntimeSubscriptions();
+    this.releaseSubscriptions(this.tabSubscriptions);
     this.visible = true;
 
     containerEl.empty();
     containerEl.addClass("notepack-settings");
 
-    this.renderTabBar(containerEl);
-    const panel = containerEl.createDiv({ cls: "notepack-settings-tabpanel" });
+    this.collectSubscriptions(this.tabSubscriptions, () => {
+      this.renderTabBar(containerEl);
+      const panel = containerEl.createDiv({ cls: "notepack-settings-tabpanel" });
 
-    if (this.activeTab === "setup") {
-      this.renderOverview(panel, settings);
-      this.renderPlanSection(panel, settings);
-      this.renderProviderSection(panel, settings);
-      this.renderWebGroundingSection(panel, settings);
-    } else if (this.activeTab === "persona") {
-      this.renderAnnotationSection(panel, settings);
-      this.renderPersonaTuningSection(panel, settings);
-    } else if (this.activeTab === "card-difficulty") {
-      this.renderCardDifficultyTab(panel, settings);
-    } else {
-      this.renderVaultPathSection(panel, settings);
-      this.renderUiLanguageSection(panel, settings);
-      this.renderMaintenanceSection(panel, settings);
+      if (this.activeTab === "setup") {
+        this.renderOverview(panel, settings);
+        this.renderPlanSection(panel, settings);
+        this.renderProviderSection(panel, settings);
+        this.renderWebGroundingSection(panel, settings);
+      } else if (this.activeTab === "persona") {
+        this.renderAnnotationSection(panel, settings);
+        this.renderPersonaTuningSection(panel, settings);
+      } else if (this.activeTab === "card-difficulty") {
+        this.renderCardDifficultyTab(panel, settings);
+      } else {
+        this.renderVaultPathSection(panel, settings);
+        this.renderUiLanguageSection(panel, settings);
+        this.renderMaintenanceSection(panel, settings);
+      }
+    });
+  }
+
+  private sectionGroup(heading: string, aliases: string[], paint: SectionPainter): SettingDefinitionGroup {
+    return { type: "group", heading, items: [this.sectionRow(heading, aliases, paint)] };
+  }
+
+  private sectionRow(name: string, aliases: string[], paint: SectionPainter): SettingDefinitionRender {
+    return {
+      name,
+      aliases,
+      render: (setting) => {
+        this.visible = true;
+        setting.settingEl.addClass("np-settings-host");
+        // Obsidian can render the same row again; drop what an earlier pass left.
+        setting.settingEl.querySelectorAll(":scope > .np-settings-host-body").forEach((el) => el.remove());
+        const mount: SectionMount = {
+          el: setting.settingEl.createDiv({ cls: "notepack-settings np-settings-host-body" }),
+          paint,
+          subscriptions: [],
+        };
+        this.mounts.add(mount);
+        this.paintMount(mount);
+        return () => this.unmount(mount);
+      },
+    };
+  }
+
+  private paintMount(mount: SectionMount): void {
+    this.releaseSubscriptions(mount.subscriptions);
+    mount.el.empty();
+    this.collectSubscriptions(mount.subscriptions, () => {
+      mount.paint(mount.el, this.plugin.settingsStore.settings);
+    });
+  }
+
+  private unmount(mount: SectionMount): void {
+    this.releaseSubscriptions(mount.subscriptions);
+    this.mounts.delete(mount);
+    mount.el.remove();
+  }
+
+  private collectSubscriptions(target: Array<() => void>, paint: () => void): void {
+    const previous = this.subscriptionTarget;
+    this.subscriptionTarget = target;
+    try {
+      paint();
+    } finally {
+      this.subscriptionTarget = previous;
     }
   }
 
-  hide(): void {
-    this.visible = false;
-    this.clearRuntimeSubscriptions();
-    super.hide();
+  private releaseSubscriptions(subscriptions: Array<() => void>): void {
+    subscriptions.splice(0).forEach((unsubscribe) => unsubscribe());
   }
 
-  private clearRuntimeSubscriptions(): void {
-    this.runtimeSubscriptions.forEach((unsubscribe) => unsubscribe());
-    this.runtimeSubscriptions = [];
+  /** Repaints after a change, in whichever form Obsidian rendered the tab. */
+  private refresh(): void {
+    // A background check can finish after the tab closed.
+    if (!this.visible) return;
+    // Before 1.13 Obsidian calls display(); from 1.13 it renders the definitions.
+    if (!requireApiVersion("1.13.0")) {
+      this.renderTabs();
+      return;
+    }
+    for (const mount of Array.from(this.mounts)) {
+      if (mount.el.isConnected) this.paintMount(mount);
+      else this.unmount(mount);
+    }
   }
 
   private renderTabBar(containerEl: HTMLElement): void {
@@ -1026,7 +1212,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       button.addEventListener("click", () => {
         if (this.activeTab === tab.id) return;
         this.activeTab = tab.id;
-        this.display();
+        this.refresh();
       });
     });
 
@@ -1054,10 +1240,18 @@ export class NotePackSettingTab extends PluginSettingTab {
   }
 
   private saveSettings(nextSettings: AISettings): void {
+    if (nextSettings.uiLanguage !== this.plugin.settingsStore.settings.uiLanguage) this.labelsStale = true;
     setLanguage(nextSettings.uiLanguage);
     this.plugin.settingsStore.updateSettings(nextSettings);
-    // A background check can finish after the tab closed.
-    if (this.visible) this.display();
+    this.refresh();
+  }
+
+  /**
+   * Saves without repainting, for text the user is still typing: a repaint
+   * replaces the input and drops the focus after every keystroke.
+   */
+  private saveSettingsQuietly(nextSettings: AISettings): void {
+    this.plugin.settingsStore.updateSettings(nextSettings);
   }
 
   private persistProviderWithModels(provider: AIProviderRecord, stagedModels: AIChatModel[]): void {
@@ -1082,8 +1276,8 @@ export class NotePackSettingTab extends PluginSettingTab {
     this.saveSettings(next);
   }
 
-  private renderOverview(containerEl: HTMLElement, settings: AISettings): void {
-    new Setting(containerEl).setName(t("settingsAiRuntime")).setHeading();
+  private renderOverview(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
+    if (withHeading) new Setting(containerEl).setName(t("settingsAiRuntime")).setHeading();
 
     const executionState = getActiveModelExecutionState(settings);
     const resolved = resolveActiveChatModel(settings);
@@ -1118,9 +1312,9 @@ export class NotePackSettingTab extends PluginSettingTab {
     });
   }
 
-  private renderPlanSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderPlanSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsPlanConnections"));
+    if (withHeading) addSettingsHeading(section, t("settingsPlanConnections"));
     section.createEl("p", {
       text: Platform.isDesktop
         ? t("settingsPlanConnectionsDesktopDesc")
@@ -1315,7 +1509,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     };
 
     paint();
-    this.runtimeSubscriptions.push(runtime.onChange(paint));
+    this.subscriptionTarget.push(runtime.onChange(paint));
     if (runtime.getSnapshot(provider).status === "unknown") {
       void this.checkNativeRuntime(provider, { silent: true });
     }
@@ -1353,9 +1547,9 @@ export class NotePackSettingTab extends PluginSettingTab {
     if (changed) this.saveSettings(next);
   }
 
-  private renderProviderSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderProviderSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsApiKeyProviders"));
+    if (withHeading) addSettingsHeading(section, t("settingsApiKeyProviders"));
     section.createEl("p", { text: t("settingsApiKeyProvidersDesc") });
 
     const toolbar = section.createDiv({ cls: "notepack-settings-toolbar" });
@@ -1422,19 +1616,18 @@ export class NotePackSettingTab extends PluginSettingTab {
       if (!isBuiltInProvider(provider)) {
         actions.createEl("button", { text: t("settingsDeleteBtn") }).addEventListener("click", () => {
           const linkedModels = getModelsForProvider(this.plugin.settingsStore.settings, provider.id);
-          const confirmed = window.confirm(
-            `${t("settingsConfirmDeleteProvider")}\n"${provider.id}" → ${linkedModels.length}`,
-          );
-          if (!confirmed) return;
-          this.saveSettings(removeProvider(this.plugin.settingsStore.settings, provider.id));
+          const message = `${t("settingsConfirmDeleteProvider")}\n"${provider.id}" → ${linkedModels.length}`;
+          void confirmAction(this.app, message, t("settingsDeleteBtn"), true).then((confirmed) => {
+            if (confirmed) this.saveSettings(removeProvider(this.plugin.settingsStore.settings, provider.id));
+          });
         });
       }
     });
   }
 
-  private renderAnnotationSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderAnnotationSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsAnnotationAgentsHeading"));
+    if (withHeading) addSettingsHeading(section, t("settingsAnnotationAgentsHeading"));
     section.createEl("p", { text: t("settingsAnnotationAgentsDesc") });
 
     const agents = normalizeAnnotationAgents(settings.annotationAgents, settings.activeChatModelId, {
@@ -1534,7 +1727,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       tabBtn.addEventListener("click", () => {
         if (this.activePersonaTab === index) return;
         this.activePersonaTab = index;
-        this.display();
+        this.refresh();
       });
     });
 
@@ -1567,7 +1760,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         };
         saveAgents([...current, newAgent]);
         this.activePersonaTab = current.length;
-        this.display();
+        this.refresh();
       });
     }
 
@@ -1599,7 +1792,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         }));
         saveAgents(next);
         this.activePersonaTab = Math.min(this.activePersonaTab, next.length - 1);
-        this.display();
+        this.refresh();
       });
     }
 
@@ -1679,7 +1872,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         });
         resetBtn.addEventListener("click", () => {
           saveAgent(activeAgent.id, { color: undefined });
-          this.display();
+          this.refresh();
         });
       });
 
@@ -1729,7 +1922,7 @@ export class NotePackSettingTab extends PluginSettingTab {
           icon: entry.defaultIcon,
           color: entry.defaultColor,
         });
-        this.display();
+        this.refresh();
       });
     });
 
@@ -1748,9 +1941,9 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderWebGroundingSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderWebGroundingSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsWebGroundingHeading"));
+    if (withHeading) addSettingsHeading(section, t("settingsWebGroundingHeading"));
 
     const resolved = resolveActiveChatModel(settings);
     const groundingSupported = Boolean(resolved?.model.supportsGrounding);
@@ -1771,9 +1964,9 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderPersonaTuningSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderPersonaTuningSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsGenerationBehaviorHeading"));
+    if (withHeading) addSettingsHeading(section, t("settingsGenerationBehaviorHeading"));
     section.createEl("p", { text: t("settingsGenerationBehaviorDesc") });
 
     new Setting(section)
@@ -1788,7 +1981,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         text.setValue(String(settings.annotationMaxSentences ?? 4));
         text.onChange((value) => {
           const parsed = Math.max(1, Math.min(10, Math.round(Number(value) || 4)));
-          this.saveSettings({
+          this.saveSettingsQuietly({
             ...this.plugin.settingsStore.settings,
             annotationMaxSentences: parsed,
           });
@@ -1822,16 +2015,16 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderVaultPathSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderVaultPathSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsVaultFoldersHeading"));
+    if (withHeading) addSettingsHeading(section, t("settingsVaultFoldersHeading"));
 
     new Setting(section)
       .setName(t("settingsPromotionFolderName"))
       .setDesc(t("settingsPromotionFolderDesc"))
       .addText((text) => {
         text.setPlaceholder("Cards").setValue(settings.promotionFolder).onChange((value) => {
-          this.saveSettings({ ...this.plugin.settingsStore.settings, promotionFolder: value.trim() || "Cards" });
+          this.saveSettingsQuietly({ ...this.plugin.settingsStore.settings, promotionFolder: value.trim() || "Cards" });
         });
       });
 
@@ -1843,7 +2036,7 @@ export class NotePackSettingTab extends PluginSettingTab {
           .setPlaceholder(this.app.vault.getName())
           .setValue(settings.noteAuthor ?? "")
           .onChange((value) => {
-            this.saveSettings({ ...this.plugin.settingsStore.settings, noteAuthor: value });
+            this.saveSettingsQuietly({ ...this.plugin.settingsStore.settings, noteAuthor: value });
           });
       });
 
@@ -1860,9 +2053,9 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderCardDifficultyTab(containerEl: HTMLElement, settings: AISettings): void {
+  private renderCardDifficultyTab(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const header = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(header, t("settingsCardDifficultyHeading"));
+    if (withHeading) addSettingsHeading(header, t("settingsCardDifficultyHeading"));
     header.createEl("p", {
       cls: "notepack-settings-difficulty-isolation",
       text: t("settingsCardDifficultyIsolationNote"),
@@ -1877,11 +2070,10 @@ export class NotePackSettingTab extends PluginSettingTab {
       "",
       PACK_DIFFICULTY_PRESETS,
       settings.customPackDifficultyPrompt ?? "",
-      (value) => {
-        this.saveSettings({
-          ...this.plugin.settingsStore.settings,
-          customPackDifficultyPrompt: value,
-        });
+      (value, repaint) => {
+        const next = { ...this.plugin.settingsStore.settings, customPackDifficultyPrompt: value };
+        if (repaint) this.saveSettings(next);
+        else this.saveSettingsQuietly(next);
       },
     );
   }
@@ -1891,7 +2083,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     sectionTitle: string,
     presets: DifficultyPresetEntry[],
     currentValue: string,
-    onSave: (value: string) => void,
+    onSave: (value: string, repaint: boolean) => void,
   ): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section notepack-settings-difficulty-section" });
     if (sectionTitle) addSettingsHeading(section, sectionTitle, "card");
@@ -1912,18 +2104,18 @@ export class NotePackSettingTab extends PluginSettingTab {
         button.addClass("notepack-settings-persona-preset-button--active");
       }
       button.addEventListener("click", () => {
-        onSave(entry.body);
+        onSave(entry.body, true);
       });
     });
 
     // Custom prompt textarea — stacked layout (label on top, textarea full-width
     // below) so the editor isn't crammed into Obsidian's narrow right column.
     const customBlock = section.createDiv({ cls: "notepack-settings-difficulty-custom" });
-    customBlock.createEl("div", {
+    customBlock.createDiv({
       text: t("settingsDifficultyCustomLabel"),
       cls: "notepack-settings-difficulty-custom-label",
     });
-    customBlock.createEl("div", {
+    customBlock.createDiv({
       text: t("settingsDifficultyCustomDesc"),
       cls: "notepack-settings-difficulty-custom-desc",
     });
@@ -1934,21 +2126,21 @@ export class NotePackSettingTab extends PluginSettingTab {
     textarea.value = currentValue;
     textarea.rows = 16;
     textarea.addEventListener("input", () => {
-      onSave(textarea.value);
+      onSave(textarea.value, false);
     });
 
     new Setting(section)
       .addButton((button) => {
         button.setButtonText(t("settingsDifficultyReset")).onClick(() => {
           textarea.value = "";
-          onSave("");
+          onSave("", true);
         });
       });
   }
 
-  private renderUiLanguageSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderUiLanguageSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsInterfaceHeading"));
+    if (withHeading) addSettingsHeading(section, t("settingsInterfaceHeading"));
 
     new Setting(section)
       .setName(t("settingsInterfaceLanguageName"))
@@ -1962,9 +2154,9 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderMaintenanceSection(containerEl: HTMLElement, _settings: AISettings): void {
+  private renderMaintenanceSection(containerEl: HTMLElement, _settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    addSettingsHeading(section, t("settingsLegacyMigrationHeading"));
+    if (withHeading) addSettingsHeading(section, t("settingsLegacyMigrationHeading"));
 
     const migration = this.plugin.settingsStore.getData().legacyMigration;
     new Setting(section)
@@ -1976,7 +2168,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       )
       .addButton((button) => {
         button.setButtonText(t("settingsRunMigration")).onClick(() => {
-          this.plugin.migrateLegacyProjects();
+          void this.plugin.migrateLegacyProjects();
         });
       });
   }

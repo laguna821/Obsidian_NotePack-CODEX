@@ -3302,3 +3302,35 @@ body.np-is-resizing-horizontal {
   cursor: ew-resize;
   user-select: none;
 }
+
+/* Obsidian 1.13+ declarative settings: one row hosts a whole NotePack section. */
+.setting-item.np-settings-host {
+  display: block;
+  padding: 0;
+  border: none;
+}
+
+.setting-item.np-settings-host > .setting-item-info,
+.setting-item.np-settings-host > .setting-item-control {
+  display: none;
+}
+
+.notepack-settings.np-settings-host-body {
+  padding-bottom: 0;
+}
+
+.np-settings-host-body > .notepack-settings-section:first-child {
+  margin-top: 0;
+}
+
+/* Setting rows in the narrow plan cards put the label above the input;
+   side by side, the label shrank to zero width and stretched the card. */
+.notepack-settings-grid .notepack-settings-card .setting-item:not(.setting-item-heading) {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notepack-settings-grid .notepack-settings-card .setting-item:not(.setting-item-heading) > .setting-item-info,
+.notepack-settings-grid .notepack-settings-card .setting-item:not(.setting-item-heading) > .setting-item-control {
+  flex: 1 1 100%;
+}

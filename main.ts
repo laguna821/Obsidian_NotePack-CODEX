@@ -23,6 +23,7 @@ import { GlobalSettingsStore } from "./src/stores/GlobalSettingsStore";
 import { setNativeRuntimeAvailability, upsertProvider } from "./src/ai/settings-registry";
 import { setProviderOAuthStore } from "./src/ai/providers";
 import { terminateAllNativeProcesses } from "./src/ai/native/process";
+import { setNativeRuntimeDeviceStore } from "./src/ai/native/runtime";
 import { closeOAuthCallbackServer } from "./src/ai/oauth";
 
 class WorkbenchChooserModal extends Modal {
@@ -42,16 +43,16 @@ class WorkbenchChooserModal extends Modal {
 
     const createButton = contentEl.createEl("button", { text: "Create new workbench" });
     createButton.addClass("mod-cta");
-    createButton.addEventListener("click", async () => {
+    createButton.addEventListener("click", () => {
       this.close();
-      await this.plugin.createNewWorkbench();
+      void this.plugin.createNewWorkbench();
     });
 
     const lastPath = this.plugin.settingsStore.lastOpenedWorkbenchPath;
     if (lastPath) {
-      contentEl.createEl("button", { text: `Open last: ${lastPath}` }).addEventListener("click", async () => {
+      contentEl.createEl("button", { text: `Open last: ${lastPath}` }).addEventListener("click", () => {
         this.close();
-        await this.plugin.openLastWorkbench();
+        void this.plugin.openLastWorkbench();
       });
     }
 
@@ -59,9 +60,9 @@ class WorkbenchChooserModal extends Modal {
     if (recent.length > 0) {
       contentEl.createEl("h3", { text: "Recent workbenches" });
       recent.slice(0, 8).forEach((path) => {
-        contentEl.createEl("button", { text: path }).addEventListener("click", async () => {
+        contentEl.createEl("button", { text: path }).addEventListener("click", () => {
           this.close();
-          await this.plugin.openWorkbenchPath(path);
+          void this.plugin.openWorkbenchPath(path);
         });
       });
     }
@@ -76,7 +77,7 @@ export default class NotePackPlugin extends Plugin {
   settingsStore!: GlobalSettingsStore;
 
   async onload(): Promise<void> {
-    const savedData = await this.loadData();
+    const savedData: unknown = await this.loadData();
     this.settingsStore = new GlobalSettingsStore(savedData);
     this.settingsStore.setSaveCallback(async (data) => {
       await this.saveData(data);
@@ -91,6 +92,15 @@ export default class NotePackPlugin extends Plugin {
 
     // Claude/Gemini Plan spawn desktop CLIs; on mobile they report unavailable.
     setNativeRuntimeAvailability(Platform.isDesktop);
+    // The Team/Enterprise consent and executable paths belong to this device,
+    // so they stay in Obsidian's local storage instead of the synced plugin data.
+    setNativeRuntimeDeviceStore({
+      get: (key) => {
+        const value: unknown = this.app.loadLocalStorage(key);
+        return typeof value === "string" ? value : undefined;
+      },
+      set: (key, value) => this.app.saveLocalStorage(key, value ?? null),
+    });
     // OpenAI Plan requests read the latest tokens and save refreshed ones here;
     // each request only holds a copy of the provider.
     setProviderOAuthStore({
@@ -110,30 +120,30 @@ export default class NotePackPlugin extends Plugin {
     this.registerView(CARD_POPOUT_VIEW_TYPE, (leaf) => new CardPopoutView(leaf, this));
 
     this.addRibbonIcon("layers", "NotePack CODEX", () => {
-      this.openLastWorkbenchOrChooser();
+      void this.openLastWorkbenchOrChooser();
     });
 
     this.addCommand({
       id: "create-notepack-codex-workbench",
-      name: "Create new NotePack CODEX workbench",
+      name: "Create new workbench",
       callback: () => this.createNewWorkbench(),
     });
 
     this.addCommand({
       id: "open-last-notepack-codex-workbench",
-      name: "Open last NotePack CODEX workbench",
+      name: "Open last workbench",
       callback: () => this.openLastWorkbenchOrChooser(),
     });
 
     this.addCommand({
       id: "open-notepack-codex-home",
-      name: "Open NotePack CODEX home",
+      name: "Open home",
       callback: () => this.openHomeView(),
     });
 
     this.addCommand({
       id: "migrate-notepack-codex-legacy-projects",
-      name: "Migrate legacy NotePack CODEX projects to .codex files",
+      name: "Migrate legacy projects to .codex files",
       callback: () => this.migrateLegacyProjects(),
     });
 
@@ -144,11 +154,12 @@ export default class NotePackPlugin extends Plugin {
     console.debug(`NotePack CODEX loaded. v${this.manifest.version}`);
   }
 
-  async onunload(): Promise<void> {
+  onunload(): void {
     setProviderOAuthStore(null);
+    setNativeRuntimeDeviceStore(undefined);
     terminateAllNativeProcesses();
-    await closeOAuthCallbackServer();
-    await this.settingsStore?.flushSave();
+    void closeOAuthCallbackServer();
+    void this.settingsStore?.flushSave();
     console.debug("NotePack CODEX unloaded.");
   }
 
@@ -197,7 +208,7 @@ export default class NotePackPlugin extends Plugin {
       const target = ourTitle();
       for (const titleNode of Array.from(titles)) {
         if (titleNode.textContent === target) {
-          return titleNode.closest(".menu-item") as HTMLElement | null;
+          return titleNode.closest(".menu-item");
         }
       }
       return null;
@@ -210,7 +221,7 @@ export default class NotePackPlugin extends Plugin {
       for (const titleNode of Array.from(titles)) {
         const text = titleNode.textContent?.trim() ?? "";
         if (text === "새 드로잉" || text === "New drawing") {
-          return titleNode.closest(".menu-item") as HTMLElement | null;
+          return titleNode.closest(".menu-item");
         }
       }
       return null;
@@ -235,7 +246,7 @@ export default class NotePackPlugin extends Plugin {
         (file !== null && typeof file === "object" && "children" in (file as object));
       if (!isFolder) return;
       handledMenus.add(menu);
-      const folderPath = (file as TFolder).path ?? "";
+      const folderPath = file.path ?? "";
       menu.addItem((item) => {
         item
           .setTitle(ourTitle())
@@ -306,16 +317,16 @@ export default class NotePackPlugin extends Plugin {
       if (menuEl.dataset.notepackHandled === "1") return;
       if (findOurItem(menuEl)) return;
 
-      const item = document.createElement("div");
+      const item = createDiv();
       item.className = "menu-item";
       item.setAttribute("tabindex", "0");
 
-      const iconEl = document.createElement("div");
+      const iconEl = createDiv();
       iconEl.className = "menu-item-icon";
       setIcon(iconEl, "layers");
       item.appendChild(iconEl);
 
-      const titleEl = document.createElement("div");
+      const titleEl = createDiv();
       titleEl.className = "menu-item-title";
       titleEl.textContent = ourTitle();
       item.appendChild(titleEl);
@@ -345,7 +356,7 @@ export default class NotePackPlugin extends Plugin {
         if (menuEl.parentElement) menuEl.remove();
       };
       const docHandler = (evt: MouseEvent | PointerEvent) => {
-        if ((evt as MouseEvent).button !== 0) return;
+        if (evt.button !== 0) return;
         const target = evt.target as Node | null;
         if (!target || !item.contains(target)) return;
         evt.preventDefault();
@@ -409,12 +420,12 @@ export default class NotePackPlugin extends Plugin {
         // the body (covers Esc, blur, click-elsewhere — anything that closes
         // the menu without triggering our injected item's path).
         for (const node of Array.from(m.removedNodes)) {
-          if (!(node instanceof HTMLElement)) continue;
+          if (!node.instanceOf(HTMLElement)) continue;
           const cleanup = menuCleanups.get(node);
           cleanup?.();
         }
         for (const node of Array.from(m.addedNodes)) {
-          if (!(node instanceof HTMLElement)) continue;
+          if (!node.instanceOf(HTMLElement)) continue;
           if (!node.classList.contains("menu")) continue;
           // DOM-injection path: only if right-click captured a folder path.
           if (folderPath !== null) {
@@ -449,7 +460,7 @@ export default class NotePackPlugin extends Plugin {
       if (!navButtons) return;
       if (navButtons.querySelector(`[${TOOLBAR_FLAG}]`)) return;
 
-      const button = document.createElement("div");
+      const button = createDiv();
       button.className = "clickable-icon nav-action-button";
       button.setAttribute("aria-label", ourLabel());
       button.setAttribute(TOOLBAR_FLAG, "1");
@@ -511,14 +522,14 @@ export default class NotePackPlugin extends Plugin {
   async openWorkbenchFile(file: TFile): Promise<void> {
     const existingLeaf = this.findOpenWorkbenchLeaf(file.path);
     if (existingLeaf) {
-      this.app.workspace.revealLeaf(existingLeaf);
+      await this.app.workspace.revealLeaf(existingLeaf);
       this.settingsStore.rememberWorkbenchPath(file.path);
       return;
     }
 
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
     this.settingsStore.rememberWorkbenchPath(file.path);
   }
 
@@ -533,7 +544,7 @@ export default class NotePackPlugin extends Plugin {
   private async openHomeView(): Promise<void> {
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: NOTEPACK_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   private async ensureFolder(folder: string): Promise<void> {

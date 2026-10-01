@@ -59,7 +59,9 @@ export function buildClaudeArgs(params: {
  */
 export function evaluateClaudeInitEvent(event: Record<string, unknown>, guard: ClaudeSessionGuard): string | undefined {
   const apiKeySource = event.apiKeySource;
-  if (apiKeySource !== undefined && apiKeySource !== null && String(apiKeySource).trim().toLowerCase() !== "none") {
+  // Anything but the string "none" (including a non-string value) is an API key route.
+  const source = typeof apiKeySource === "string" ? apiKeySource.trim().toLowerCase() : "unknown";
+  if (apiKeySource !== undefined && apiKeySource !== null && source !== "none") {
     return "Claude Code selected an API key source instead of the subscription login.";
   }
   if (!guard.organization) return undefined;

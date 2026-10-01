@@ -371,22 +371,20 @@ function firstLine(value: string): string | undefined {
   return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
 }
 
-export const localDeviceStore: DeviceStore = {
-  get(key) {
-    try {
-      return window.localStorage.getItem(key) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  },
-  set(key, value) {
-    try {
-      if (value === undefined) window.localStorage.removeItem(key);
-      else window.localStorage.setItem(key, value);
-    } catch {
-      // Without storage the device-local value cannot persist; guards stay closed.
-    }
-  },
+let deviceStore: DeviceStore | undefined;
+
+/**
+ * Sets where device-local values (the Team/Enterprise consent and executable
+ * paths) persist. The plugin passes Obsidian's per-vault local storage, which
+ * never syncs with the vault. Until then nothing persists and guards stay closed.
+ */
+export function setNativeRuntimeDeviceStore(store: DeviceStore | undefined): void {
+  deviceStore = store;
+}
+
+const configuredDeviceStore: DeviceStore = {
+  get: (key) => deviceStore?.get(key),
+  set: (key, value) => deviceStore?.set(key, value),
 };
 
 export function createDesktopNativeRuntimeDeps(): NativeRuntimeDeps {
@@ -429,7 +427,7 @@ export function createDesktopNativeRuntimeDeps(): NativeRuntimeDeps {
       }
     },
     writeFile: (candidate, content) => fs.writeFileSync(candidate, content, "utf8"),
-    store: localDeviceStore,
+    store: configuredDeviceStore,
     now: () => Date.now(),
     openTerminal: launchVisibleTerminal,
   };

@@ -42,8 +42,8 @@ function normalizeLegacyMigrationState(raw: unknown): LegacyMigrationState {
   return {
     ...DEFAULT_LEGACY_MIGRATION_STATE,
     ...candidate,
-    migratedProjectIds: Array.isArray(candidate?.migratedProjectIds) ? candidate!.migratedProjectIds : [],
-    migratedPaths: Array.isArray(candidate?.migratedPaths) ? candidate!.migratedPaths : [],
+    migratedProjectIds: Array.isArray(candidate?.migratedProjectIds) ? candidate.migratedProjectIds : [],
+    migratedPaths: Array.isArray(candidate?.migratedPaths) ? candidate.migratedPaths : [],
   };
 }
 
@@ -53,7 +53,7 @@ function normalizeRecentPaths(raw: unknown): string[] {
 }
 
 function normalizeGlobalSettings(raw: unknown): AISettings {
-  return normalizeAISettings((raw || {}) as Partial<AISettings>);
+  return normalizeAISettings(raw || {});
 }
 
 const NATIVE_RUNTIME_PROVIDER_TYPES = new Set(["anthropic-plan", "gemini-plan"]);
@@ -90,7 +90,7 @@ export function migrateGlobalPluginData(savedData: unknown): GlobalDataMigration
   const migrationsApplied: string[] = [];
 
   if (isLegacyPluginData(savedData)) {
-    const settings = migrateLegacyAISettings(savedData.settings as unknown as Partial<AISettings>);
+    const settings = migrateLegacyAISettings(savedData.settings);
     const removedFromBackup = removeNativeRuntimeCredentials(savedData.settings);
     if (removeNativeRuntimeCredentials(settings) || removedFromBackup) {
       migrationsApplied.push("plan-oauth-tokens-removed");

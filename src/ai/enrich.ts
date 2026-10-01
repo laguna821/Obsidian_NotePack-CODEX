@@ -346,7 +346,7 @@ You have live web access. For this note type, include 1–2 real source citation
   // Map indices back to card IDs
   const influencedByIds = parsed.influencedByIndices
     .map((idx) => context[idx]?.id)
-    .filter(Boolean) as string[];
+    .filter(Boolean);
 
   // Extract sources from annotations
   const annotations = (result.annotations || []) as Array<{

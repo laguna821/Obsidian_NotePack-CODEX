@@ -29,7 +29,7 @@ export function normalizeMessageContent(content: unknown): string {
 
   if (Array.isArray(content)) {
     return content
-      .map((item) => {
+      .map((item: unknown) => {
         if (typeof item === "string") return item;
         if (item && typeof item === "object" && "text" in item && typeof item.text === "string") {
           return item.text;

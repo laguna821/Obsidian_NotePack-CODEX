@@ -9,7 +9,7 @@ export class GlobalSettingsStore {
   private readonly legacyData?: LegacyNotePackPluginData;
   readonly migrationsApplied: string[];
   private saveCallback: ((data: NotePackGlobalPluginData) => Promise<void>) | null = null;
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveTimer: number | null = null;
   private listeners: Set<Listener> = new Set();
 
   constructor(savedData: unknown) {
@@ -36,15 +36,15 @@ export class GlobalSettingsStore {
   }
 
   private scheduleSave(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      this.saveCallback?.(this.data);
+    if (this.saveTimer) window.clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => {
+      void this.saveCallback?.(this.data);
     }, 300);
   }
 
   async flushSave(): Promise<void> {
     if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
+      window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
     await this.saveCallback?.(this.data);

@@ -96,9 +96,9 @@ export class PackModal extends Modal {
       cls: "np-pack-modal-reroll",
       text: t("reroll"),
     });
-    rerollButton.addEventListener("click", async () => {
+    rerollButton.addEventListener("click", () => {
       if (this.isGenerating) return;
-      await this.generate();
+      void this.generate();
     });
     this.rerollButtonEl = rerollButton;
 
@@ -139,7 +139,7 @@ export class PackModal extends Modal {
 
       const elapsedInSeed = Date.now() - seedStageStartedAt;
       if (elapsedInSeed < STAGE_SEED_MIN_MS) {
-        await new Promise((resolve) => setTimeout(resolve, STAGE_SEED_MIN_MS - elapsedInSeed));
+        await new Promise((resolve) => window.setTimeout(resolve, STAGE_SEED_MIN_MS - elapsedInSeed));
       }
       if (controller.signal.aborted) return;
       this.setStageText(t("packStageGenerating"));
@@ -276,7 +276,7 @@ export class PackModal extends Modal {
 
     const totalDecided = this.session.keptIds.length + this.session.discardedIds.length;
     if (totalDecided >= this.session.cards.length) {
-      setTimeout(() => {
+      window.setTimeout(() => {
         new Notice("Pack complete");
       }, 500);
     }

@@ -53,11 +53,11 @@ export class VaultService {
   }
 
   async mergeIntoNote(card: WorkbenchCard, notePath: string): Promise<void> {
-    const file = this.app.vault.getAbstractFileByPath(notePath);
+    const file = this.app.vault.getFileByPath(notePath);
     if (!file) throw new Error(`Note not found: ${notePath}`);
 
-    const existing = await this.app.vault.read(file as any);
-    await this.app.vault.modify(file as any, `${existing}\n\n---\n\n## Added Card\n\n${card.text}`);
+    const existing = await this.app.vault.read(file);
+    await this.app.vault.modify(file, `${existing}\n\n---\n\n## Added Card\n\n${card.text}`);
   }
 
   private async ensureFolder(path: string): Promise<void> {

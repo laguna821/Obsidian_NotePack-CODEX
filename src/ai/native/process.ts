@@ -52,7 +52,7 @@ export function runNativeProcess(options: NativeProcessOptions): Promise<NativeP
     const abort = () => terminateProcessTree(child);
     const timer =
       options.timeoutMs && options.timeoutMs > 0
-        ? setTimeout(() => {
+        ? window.setTimeout(() => {
             timedOut = true;
             terminateProcessTree(child);
           }, options.timeoutMs)
@@ -66,7 +66,7 @@ export function runNativeProcess(options: NativeProcessOptions): Promise<NativeP
     const finish = () => {
       settled = true;
       activeChildren.delete(child);
-      if (timer) clearTimeout(timer);
+      if (timer) window.clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
     };
 

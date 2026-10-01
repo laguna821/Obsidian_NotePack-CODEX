@@ -161,7 +161,7 @@ function parseSseJsonEvents(payload: string): Array<Record<string, unknown>> {
     if (!data || data === "[DONE]") continue;
 
     try {
-      const parsed = JSON.parse(data);
+      const parsed: unknown = JSON.parse(data);
       const record = asRecord(parsed);
       if (record) events.push(record);
     } catch {

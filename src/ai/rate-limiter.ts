@@ -17,8 +17,9 @@ const DEFAULT_LIMIT: ProviderRateLimit = { concurrency: 2, minIntervalMs: 2000 }
 
 const PROVIDER_LIMITS: Record<string, ProviderRateLimit> = {
   "openai-plan": { concurrency: 1, minIntervalMs: 6000 },
-  "anthropic-plan": { concurrency: 1, minIntervalMs: 6000 },
-  "gemini-plan": { concurrency: 1, minIntervalMs: 6000 },
+  // Native CLIs start a process per request; one at a time is enough pacing.
+  "anthropic-plan": { concurrency: 1, minIntervalMs: 0 },
+  "gemini-plan": { concurrency: 1, minIntervalMs: 0 },
   anthropic: { concurrency: 2, minIntervalMs: 2000 },
   openai: { concurrency: 2, minIntervalMs: 2000 },
   gemini: { concurrency: 2, minIntervalMs: 2000 },
@@ -31,8 +32,11 @@ function getLimit(providerType: string): ProviderRateLimit {
 class Semaphore {
   private pending: Array<() => void> = [];
   private active = 0;
+  private readonly max: number;
 
-  constructor(private readonly max: number) {}
+  constructor(max: number) {
+    this.max = max;
+  }
 
   async acquire(): Promise<() => void> {
     if (this.active < this.max) {
@@ -56,8 +60,11 @@ class Semaphore {
 
 class IntervalGate {
   private lastRun = 0;
+  private readonly minIntervalMs: number;
 
-  constructor(private readonly minIntervalMs: number) {}
+  constructor(minIntervalMs: number) {
+    this.minIntervalMs = minIntervalMs;
+  }
 
   async wait(signal?: AbortSignal): Promise<void> {
     const now = Date.now();
@@ -223,6 +230,11 @@ function notifyRateLimitOnce(info: ProviderHttpError): void {
 
 // ── Combined helper for provider call sites ────────────────────────────────
 
+// A failed CLI run is never retried: the status scraped from its message is
+// unreliable, and a retry would re-run the whole request against the user's
+// subscription quota.
+const NO_RETRY_PROVIDERS = new Set(["anthropic-plan", "gemini-plan"]);
+
 export async function executeProviderRequest<T>(
   providerType: string,
   signal: AbortSignal | undefined,
@@ -230,7 +242,7 @@ export async function executeProviderRequest<T>(
 ): Promise<T> {
   return providerQueue.enqueue(
     providerType,
-    () => withRetry(fn, { signal, retries: 3 }),
+    () => (NO_RETRY_PROVIDERS.has(providerType) ? fn() : withRetry(fn, { signal, retries: 3 })),
     signal,
   );
 }

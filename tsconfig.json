@@ -20,6 +20,8 @@
     "declarationMap": false,
     "sourceMap": false,
     "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
     "types": ["node"]
   },
   "include": ["main.ts", "src/**/*.ts"],

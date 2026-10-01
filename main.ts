@@ -2,6 +2,7 @@ import {
   type Menu,
   Modal,
   Notice,
+  Platform,
   Plugin,
   type TAbstractFile,
   TFile,
@@ -19,10 +20,17 @@ import { CardPopoutView, CARD_POPOUT_VIEW_TYPE } from "./src/views/CardPopoutVie
 import { createEmptyCodexDocument, serializeCodexDocument } from "./src/data/codex-document";
 import { migrateLegacyProjectsToCodexFiles } from "./src/data/legacy-migration";
 import { GlobalSettingsStore } from "./src/stores/GlobalSettingsStore";
+import { setNativeRuntimeAvailability, upsertProvider } from "./src/ai/settings-registry";
+import { setProviderOAuthStore } from "./src/ai/providers";
+import { terminateAllNativeProcesses } from "./src/ai/native/process";
+import { closeOAuthCallbackServer } from "./src/ai/oauth";
 
 class WorkbenchChooserModal extends Modal {
-  constructor(private readonly plugin: NotePackPlugin) {
+  private readonly plugin: NotePackPlugin;
+
+  constructor(plugin: NotePackPlugin) {
     super(plugin.app);
+    this.plugin = plugin;
   }
 
   onOpen(): void {
@@ -74,15 +82,27 @@ export default class NotePackPlugin extends Plugin {
       await this.saveData(data);
     });
 
-    if (this.settingsStore.migrationsApplied.includes("gemini-plan-tokens-cleared")) {
-      new Notice(
-        "보안 업데이트: 평문 시크릿이 제거되어 Gemini Plan 연결이 해제되었습니다. 본인 GCP OAuth 클라이언트로 다시 연결하거나 Gemini API Key 모드를 사용하세요.",
-        12000,
-      );
+    setLanguage(this.settingsStore.settings.uiLanguage);
+
+    if (this.settingsStore.migrationsApplied.includes("plan-oauth-tokens-removed")) {
+      new Notice(t("migrationPlanTokensRemoved"), 15000);
       await this.settingsStore.flushSave();
     }
 
-    setLanguage(this.settingsStore.settings.uiLanguage);
+    // Claude/Gemini Plan spawn desktop CLIs; on mobile they report unavailable.
+    setNativeRuntimeAvailability(Platform.isDesktop);
+    // OpenAI Plan requests read the latest tokens and save refreshed ones here;
+    // each request only holds a copy of the provider.
+    setProviderOAuthStore({
+      read: (providerId) => this.settingsStore.settings.providers.find((item) => item.id === providerId)?.oauth,
+      write: (providerId, oauth, previousRefreshToken) => {
+        const current = this.settingsStore.settings;
+        const provider = current.providers.find((item) => item.id === providerId);
+        // The user disconnected or reconnected while the request ran.
+        if (!provider?.oauth || provider.oauth.refreshToken !== previousRefreshToken) return;
+        this.settingsStore.updateSettings(upsertProvider(current, { ...provider, oauth }));
+      },
+    });
 
     this.registerView(CODEX_FILE_VIEW_TYPE, (leaf) => new CodexFileView(leaf, this));
     this.registerExtensions(["codex"], CODEX_FILE_VIEW_TYPE);
@@ -125,6 +145,9 @@ export default class NotePackPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    setProviderOAuthStore(null);
+    terminateAllNativeProcesses();
+    await closeOAuthCallbackServer();
     await this.settingsStore?.flushSave();
     console.log("NotePack CODEX unloaded.");
   }

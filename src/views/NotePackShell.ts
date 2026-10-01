@@ -524,6 +524,7 @@ export class NotePackShell {
         this.getRuntimeSettings(),
         this.store.enrichedCards,
         document.lastGhostTexts || [],
+        controller.signal,
       );
 
       if (controller.signal.aborted) {

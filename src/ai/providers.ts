@@ -1,5 +1,14 @@
 import { requestUrl, type RequestUrlParam } from "obsidian";
-import type { AIConfig } from "../types";
+import type { AIConfig, AIOAuthState } from "../types";
+import {
+  buildAnthropicMessagesBody,
+  claudeCliEffort,
+  normalizeMessageContent,
+  rejectsSampling,
+  splitMessagesForCli,
+  type ChatCompletionOptions,
+  type ChatMessage,
+} from "./request-shapes";
 import { buildAIConfig } from "./settings-registry";
 import {
   buildOpenAIPlanCodexRequestBody,
@@ -7,33 +16,12 @@ import {
   extractOpenAIPlanErrorMessage,
   parseOpenAIPlanCodexSse,
 } from "./openai-plan";
-import {
-  CLAUDE_CODE_DEFAULT_BETAS,
-  CLAUDE_CODE_MESSAGES_ENDPOINT,
-  CLAUDE_CODE_SYSTEM_MESSAGE,
-  CLAUDE_CODE_USER_AGENT,
-  CODE_ASSIST_CLIENT_HEADERS,
-  refreshAnthropicPlanToken,
-  refreshOpenAIPlanToken,
-  setupCodeAssistUser,
-} from "./oauth";
+import { refreshOpenAIPlanToken, type OAuthTokenResponse } from "./oauth";
+import { getNativeRuntime } from "./native/runtime";
 import { executeProviderRequest } from "./rate-limiter";
 
 export { buildAIConfig, buildAIConfigForModel } from "./settings-registry";
-
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
-
-export interface ChatCompletionOptions {
-  model: string;
-  messages: ChatMessage[];
-  temperature?: number;
-  response_format?: Record<string, unknown>;
-  web_search_options?: Record<string, unknown>;
-  signal?: AbortSignal;
-}
+export type { ChatCompletionOptions, ChatMessage } from "./request-shapes";
 
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
@@ -52,7 +40,12 @@ function truncateErrorBody(text: string): string {
 
 function throwProviderError(config: AIConfig, response: { status: number; text: string }): never {
   if (config.providerType === "openai-plan") {
-    throw new Error(`AI error (${config.providerType}) ${response.status}: ${extractOpenAIPlanErrorMessage(response.text)}`);
+    const message = extractOpenAIPlanErrorMessage(response.text);
+    // The Codex backend can gate new models by client version.
+    const hint = /newer version of codex/i.test(message)
+      ? " This model is not available through NotePack's OpenAI Plan connection yet. Choose GPT-5.6 Sol (Plan) in settings."
+      : "";
+    throw new Error(`AI error (${config.providerType}) ${response.status}: ${message}${hint}`);
   }
   throw new Error(`AI error (${config.providerType}) ${response.status}: ${truncateErrorBody(response.text)}`);
 }
@@ -63,7 +56,7 @@ function toJsonBody(options: ChatCompletionOptions): Record<string, unknown> {
     messages: options.messages,
   };
 
-  if (options.temperature !== undefined) body.temperature = options.temperature;
+  if (options.temperature !== undefined && !rejectsSampling(options.model)) body.temperature = options.temperature;
   if (options.response_format) body.response_format = options.response_format;
   if (options.web_search_options) body.web_search_options = options.web_search_options;
 
@@ -115,62 +108,115 @@ function createOpenAICompatibleHeaders(config: AIConfig): Record<string, string>
   return headers;
 }
 
-function normalizeMessageContent(content: unknown): string {
-  if (typeof content === "string") return content;
+const OPENAI_PLAN_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses";
 
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        if (typeof item === "string") return item;
-        if (item && typeof item === "object" && "text" in item && typeof item.text === "string") {
-          return item.text;
-        }
-        return "";
-      })
-      .join("\n")
-      .trim();
-  }
-
-  return "";
+/**
+ * Where OpenAI Plan tokens live between requests. AIConfig carries a copy of
+ * the provider made before the request was queued, so requests read the
+ * latest saved tokens here and save refreshed ones back.
+ */
+export interface ProviderOAuthStore {
+  /** The saved OAuth state, or undefined once the user disconnected. */
+  read(providerId: string): AIOAuthState | undefined;
+  /** Saves refreshed tokens unless the saved refresh token changed meanwhile. */
+  write(providerId: string, oauth: AIOAuthState, previousRefreshToken: string | undefined): void;
 }
 
-const OPENAI_PLAN_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses";
+let providerOAuthStore: ProviderOAuthStore | null = null;
+
+export function setProviderOAuthStore(store: ProviderOAuthStore | null): void {
+  providerOAuthStore = store;
+}
+
+// Refresh tokens rotate and OpenAI rejects a reused one, so every request that
+// still holds an old refresh token gets the result of its single refresh.
+const refreshesInFlight = new Map<string, Promise<OAuthTokenResponse>>();
+const completedRefreshes = new Map<string, { result: OAuthTokenResponse; at: number }>();
+const COMPLETED_REFRESH_TTL_MS = 15 * 60_000;
+
+function refreshOpenAIPlanTokenOnce(refreshToken: string): Promise<OAuthTokenResponse> {
+  const now = Date.now();
+  for (const [token, entry] of completedRefreshes) {
+    if (now - entry.at > COMPLETED_REFRESH_TTL_MS) completedRefreshes.delete(token);
+  }
+  const completed = completedRefreshes.get(refreshToken);
+  if (completed) return Promise.resolve(completed.result);
+  const existing = refreshesInFlight.get(refreshToken);
+  if (existing) return existing;
+  const refresh = refreshOpenAIPlanToken({ refreshToken })
+    .then((result) => {
+      completedRefreshes.set(refreshToken, { result, at: Date.now() });
+      return result;
+    })
+    .finally(() => {
+      refreshesInFlight.delete(refreshToken);
+    });
+  refreshesInFlight.set(refreshToken, refresh);
+  return refresh;
+}
+
+/**
+ * Builds request headers from the latest saved tokens. `rejectedAccessToken`
+ * is the token a 401 came back for: it is refreshed unless another request
+ * already replaced it.
+ */
+async function resolveOpenAIPlanHeaders(
+  config: AIConfig,
+  rejectedAccessToken?: string,
+): Promise<{ headers: Record<string, string>; accessToken: string }> {
+  const current = providerOAuthStore ? providerOAuthStore.read(config.provider.id) : config.provider.oauth;
+  const force = rejectedAccessToken !== undefined && current?.accessToken === rejectedAccessToken;
+  const result = await createOpenAIPlanHeaders({
+    oauth: force && current ? { ...current, expiresAt: 0 } : current,
+    refresh: refreshOpenAIPlanTokenOnce,
+  });
+  if (current && result.oauth.accessToken !== current.accessToken) {
+    providerOAuthStore?.write(config.provider.id, result.oauth, current.refreshToken);
+  }
+  config.provider.oauth = result.oauth;
+  return { headers: result.headers, accessToken: result.oauth.accessToken };
+}
 
 async function callOpenAIPlanChatCompletion(
   config: AIConfig,
   options: ChatCompletionOptions,
 ): Promise<{ content: string; annotations?: unknown[] }> {
-  let headerResult;
-  try {
-    headerResult = await createOpenAIPlanHeaders({
-      oauth: config.provider.oauth,
-      refresh: async (refreshToken) => refreshOpenAIPlanToken({ refreshToken }),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Reconnect OpenAI Plan in settings.";
-    throw new Error(message);
-  }
+  const body = JSON.stringify(
+    buildOpenAIPlanCodexRequestBody({
+      model: options.model,
+      messages: options.messages.map((message) => ({
+        role: message.role,
+        content: normalizeMessageContent(message.content),
+      })),
+      reasoning_effort: config.model.reasoning?.enabled ? config.model.reasoning.reasoning_effort : undefined,
+    }),
+  );
 
-  const params: RequestUrlParam = {
-    url: OPENAI_PLAN_CODEX_URL,
-    method: "POST",
-    headers: headerResult.headers,
-    body: JSON.stringify(
-      buildOpenAIPlanCodexRequestBody({
-        model: options.model,
-        messages: options.messages.map((message) => ({
-          role: message.role,
-          content: normalizeMessageContent(message.content),
-        })),
-        reasoning_effort: config.model.reasoning?.enabled ? config.model.reasoning.reasoning_effort : undefined,
-      }),
-    ),
-    contentType: "application/json",
-    throw: false,
+  const send = async (rejectedAccessToken?: string) => {
+    let auth: { headers: Record<string, string>; accessToken: string };
+    try {
+      auth = await resolveOpenAIPlanHeaders(config, rejectedAccessToken);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "Reconnect OpenAI Plan in settings.");
+    }
+    const response = await requestUrl({
+      url: OPENAI_PLAN_CODEX_URL,
+      method: "POST",
+      headers: auth.headers,
+      body,
+      contentType: "application/json",
+      throw: false,
+    });
+    return { response, accessToken: auth.accessToken };
   };
 
   const response = await executeProviderRequest(config.providerType, options.signal, async () => {
-    const result = await requestUrl(params);
+    let attempt = await send();
+    // A request can race token expiry; refresh once and retry once.
+    if (attempt.response.status === 401 && config.provider.oauth?.refreshToken) {
+      attempt = await send(attempt.accessToken);
+    }
+    const result = attempt.response;
     if (result.status >= 400) throwProviderError(config, result);
     return result;
   });
@@ -232,33 +278,11 @@ async function callAnthropicChatCompletion(
   config: AIConfig,
   options: ChatCompletionOptions,
 ): Promise<{ content: string; annotations?: unknown[] }> {
-  const systemPrompt = options.messages
-    .filter((message) => message.role === "system")
-    .map((message) => message.content)
-    .join("\n\n")
-    .trim();
-
-  const messages = options.messages
-    .filter((message) => message.role !== "system")
-    .map((message) => ({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content: message.content,
-    }));
-
-  const body: Record<string, unknown> = {
-    model: options.model,
-    max_tokens: 4096,
-    messages,
-  };
-
-  if (systemPrompt) body.system = systemPrompt;
-  if (options.temperature !== undefined) body.temperature = options.temperature;
-
   const params: RequestUrlParam = {
     url: `${stripTrailingSlash(config.baseUrl)}/messages`,
     method: "POST",
     headers: anthropicHeaders(config),
-    body: JSON.stringify(body),
+    body: JSON.stringify(buildAnthropicMessagesBody(options.model, config.model.thinking, options)),
     contentType: "application/json",
     throw: false,
   };
@@ -270,6 +294,9 @@ async function callAnthropicChatCompletion(
   });
 
   const data = response.json;
+  if (data?.stop_reason === "refusal") {
+    throw new Error("Claude declined this request (refusal). Rephrase the content or choose another model.");
+  }
   const content = Array.isArray(data?.content)
     ? data.content
         .map((item: { type?: string; text?: string }) => (item?.type === "text" ? item.text || "" : ""))
@@ -278,7 +305,11 @@ async function callAnthropicChatCompletion(
     : "";
 
   if (!content) {
-    throw new Error("No content in Anthropic response");
+    throw new Error(
+      data?.stop_reason === "max_tokens"
+        ? "Claude ran out of output tokens before answering. Try a lower effort or a shorter input."
+        : "No content in Anthropic response",
+    );
   }
 
   return {
@@ -287,108 +318,36 @@ async function callAnthropicChatCompletion(
   };
 }
 
-async function resolveAnthropicPlanAccessToken(config: AIConfig): Promise<string> {
-  const oauth = config.provider.oauth;
-  if (!oauth?.accessToken && !oauth?.refreshToken) {
-    throw new Error("Connect Claude Plan in settings first.");
-  }
-  const now = Date.now();
-  if (oauth.accessToken && (oauth.expiresAt === undefined || oauth.expiresAt > now)) {
-    return oauth.accessToken;
-  }
-  if (!oauth.refreshToken) {
-    throw new Error("Reconnect Claude Plan in settings.");
-  }
-  const refreshed = await refreshAnthropicPlanToken({ refreshToken: oauth.refreshToken });
-  if (!refreshed.access_token) {
-    throw new Error("Claude Plan token refresh returned no access token.");
-  }
-  return refreshed.access_token;
-}
-
-async function callAnthropicPlanChatCompletion(
+async function callClaudePlanChatCompletion(
   config: AIConfig,
   options: ChatCompletionOptions,
 ): Promise<{ content: string; annotations?: unknown[] }> {
-  // Claude Code OAuth tokens are only honored when the request declares
-  // itself as the official CLI: specific beta flags + system message + UA.
-  // Smart Composer's pattern (which works end-to-end) is mirrored here.
-  const accessToken = await resolveAnthropicPlanAccessToken(config);
-  const originalSystem = options.messages
-    .filter((m) => m.role === "system")
-    .map((m) => normalizeMessageContent(m.content))
-    .join("\n\n")
-    .trim();
-  const nonSystem: Array<{ role: "user" | "assistant"; content: string }> = options.messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: normalizeMessageContent(m.content),
-    }));
+  const { systemPrompt, prompt } = splitMessagesForCli(options.messages);
+  const content = await executeProviderRequest(config.providerType, options.signal, () =>
+    getNativeRuntime().completeWithClaude({
+      model: options.model,
+      effort: claudeCliEffort(config.model.model, config.model.thinking),
+      systemPrompt,
+      prompt,
+      signal: options.signal,
+    }),
+  );
+  return { content, annotations: undefined };
+}
 
-  // Forcibly set system to the Claude Code prefix; relocate the user's actual
-  // system content as a leading USER message (Anthropic's contract for plan).
-  const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
-  if (originalSystem) {
-    messages.push({ role: "user", content: originalSystem });
-  }
-  messages.push(...nonSystem);
-
-  const thinkingBudget = config.model.thinking?.enabled
-    ? config.model.thinking.budget_tokens ?? 8192
-    : undefined;
-
-  const body: Record<string, unknown> = {
-    model: options.model,
-    max_tokens: thinkingBudget ? thinkingBudget + 8192 : 8192,
-    system: CLAUDE_CODE_SYSTEM_MESSAGE,
-    messages,
-  };
-  // Anthropic only honors temperature=1 when thinking is enabled, so when
-  // thinking is on we omit temperature and let the API default to 1 instead
-  // of returning HTTP 400 for any other value.
-  if (options.temperature !== undefined && !thinkingBudget) {
-    body.temperature = options.temperature;
-  }
-  if (thinkingBudget) {
-    body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
-  }
-
-  // ?beta=true mirrors what Smart Composer/Opencode use.
-  const url = new URL(CLAUDE_CODE_MESSAGES_ENDPOINT);
-  if (!url.searchParams.has("beta")) url.searchParams.set("beta", "true");
-
-  const params: RequestUrlParam = {
-    url: url.toString(),
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta": CLAUDE_CODE_DEFAULT_BETAS.join(","),
-      "user-agent": CLAUDE_CODE_USER_AGENT,
-    },
-    body: JSON.stringify(body),
-    contentType: "application/json",
-    throw: false,
-  };
-
-  const response = await executeProviderRequest(config.providerType, options.signal, async () => {
-    const result = await requestUrl(params);
-    if (result.status >= 400) throwProviderError(config, result);
-    return result;
-  });
-
-  const data = response.json;
-  const content = Array.isArray(data?.content)
-    ? data.content
-        .map((item: { type?: string; text?: string }) => (item?.type === "text" ? item.text || "" : ""))
-        .join("\n")
-        .trim()
-    : "";
-  if (!content) {
-    throw new Error("No content in Claude Plan response");
-  }
+async function callGeminiPlanChatCompletion(
+  config: AIConfig,
+  options: ChatCompletionOptions,
+): Promise<{ content: string; annotations?: unknown[] }> {
+  const { systemPrompt, prompt } = splitMessagesForCli(options.messages);
+  const content = await executeProviderRequest(config.providerType, options.signal, () =>
+    getNativeRuntime().completeWithGemini({
+      model: options.model,
+      systemPrompt,
+      prompt,
+      signal: options.signal,
+    }),
+  );
   return { content, annotations: undefined };
 }
 
@@ -602,116 +561,6 @@ async function callGeminiChatCompletion(
   };
 }
 
-async function callGeminiPlanChatCompletion(
-  config: AIConfig,
-  options: ChatCompletionOptions,
-): Promise<{ content: string; annotations?: unknown[] }> {
-  const systemPrompt = options.messages
-    .filter((message) => message.role === "system")
-    .map((message) => message.content)
-    .join("\n\n")
-    .trim();
-
-  // Code Assist envelope mirrors the minimum shape Smart Composer (which
-  // works end-to-end) sends: {project, model, request: {contents,
-  // systemInstruction(with role), generationConfig}}. No user_prompt_id,
-  // no enabled_credit_types, no session_id — adding those was actually
-  // confusing the backend and producing 500 INTERNAL.
-  const innerRequest: Record<string, unknown> = {
-    contents: buildGeminiContents(options.messages),
-  };
-  if (systemPrompt) {
-    innerRequest.systemInstruction = {
-      role: "system",
-      parts: [{ text: systemPrompt }],
-    };
-  }
-  const generationConfig = buildGeminiGenerationConfig(config, options);
-  if (generationConfig) {
-    innerRequest.generationConfig = generationConfig;
-  }
-  if (options.web_search_options) {
-    innerRequest.tools = [{ google_search: {} }];
-  }
-
-  // Self-heal: if we never captured a managedProjectId (e.g. user connected
-  // with an earlier plugin build that lacked the Code Assist client headers
-  // and onboarding silently failed), run setup lazily and persist the result
-  // on the provider's OAuth record so subsequent calls reuse it.
-  let projectId = config.managedProjectId;
-  let lazySetupError: Error | null = null;
-  if (!projectId && config.authToken && config.provider.oauth) {
-    try {
-      const setup = await setupCodeAssistUser(config.authToken);
-      if (setup.projectId) {
-        projectId = setup.projectId;
-        config.provider.oauth.managedProjectId = projectId;
-      }
-    } catch (setupError) {
-      lazySetupError =
-        setupError instanceof Error ? setupError : new Error(String(setupError));
-      console.error("Code Assist lazy onboarding failed", setupError);
-    }
-  }
-  // Without a project ID the request goes out with `project: undefined`, which
-  // Code Assist answers with 404 NOT_FOUND on the *project* — users routinely
-  // misread that as a model deprecation. Block the doomed request and surface
-  // the actual cause so the user knows reconnect / API-Key-mode is the fix.
-  if (!projectId) {
-    const detail = lazySetupError
-      ? lazySetupError.message
-      : "managedProjectId가 저장되어 있지 않습니다";
-    throw new Error(
-      `Code Assist 프로젝트가 설정되지 않았습니다 (${detail}). Gemini Plan 연결을 해제하고 다시 로그인하거나 Gemini API Key 모드로 전환하세요.`,
-    );
-  }
-
-  const envelope: Record<string, unknown> = {
-    project: projectId,
-    model: options.model,
-    request: innerRequest,
-  };
-
-  // cloudcode-pa.googleapis.com CORS-blocks browser fetch. Use Obsidian's
-  // requestUrl (Electron net.request) which bypasses CORS preflight. That
-  // means non-streaming :generateContent — streaming SSE would need Node's
-  // http module, which is overkill since NotePack doesn't show tokens live.
-  const baseUrl = stripTrailingSlash(config.baseUrl);
-  const url = `${baseUrl}:generateContent`;
-
-  const params: RequestUrlParam = {
-    url,
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.authToken ?? ""}`,
-      ...CODE_ASSIST_CLIENT_HEADERS,
-    },
-    body: JSON.stringify(envelope),
-    contentType: "application/json",
-    throw: false,
-  };
-
-  const response = await executeProviderRequest(config.providerType, options.signal, async () => {
-    const result = await requestUrl(params);
-    if (result.status >= 400) throwProviderError(config, result);
-    return result;
-  });
-
-  // Code Assist wraps the standard Gemini generateContent body under `.response`.
-  const root = response.json as { response?: unknown };
-  const inner =
-    root && typeof root === "object" && "response" in root ? root.response : root;
-  const content = extractGeminiText(inner);
-  if (!content) {
-    throw new Error("No content in Gemini Plan (Code Assist) response");
-  }
-  return {
-    content,
-    annotations: extractGeminiAnnotations(inner),
-  };
-}
-
 export async function chatCompletion(
   config: AIConfig,
   options: ChatCompletionOptions,
@@ -720,7 +569,7 @@ export async function chatCompletion(
     return callOpenAIPlanChatCompletion(config, options);
   }
   if (config.providerType === "anthropic-plan") {
-    return callAnthropicPlanChatCompletion(config, options);
+    return callClaudePlanChatCompletion(config, options);
   }
   if (config.providerType === "gemini-plan") {
     return callGeminiPlanChatCompletion(config, options);

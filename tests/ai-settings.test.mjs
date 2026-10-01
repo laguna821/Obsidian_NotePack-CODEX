@@ -6,6 +6,8 @@ import {
   DEFAULT_CHAT_MODELS,
   buildAIConfig,
   buildAIConfigForModel,
+  getProviderConnectionSummary,
+  getProviderDefinition,
   migrateLegacyAISettings,
   normalizeAISettings,
   resolveActiveChatModel,
@@ -13,8 +15,10 @@ import {
   canExecuteActiveModel,
   getActiveModelExecutionState,
   getModelExecutionState,
+  setNativeRuntimeAvailability,
 } from '../src/ai/settings-registry.ts';
-import { createDefaultAnnotationAgents, getPersonaPreset } from '../src/ai/personas.ts';
+import { RETIRED_MODEL_REPLACEMENTS, replaceRetiredModelId } from '../src/ai/model-retirement.ts';
+import { createDefaultAnnotationAgents, normalizeAnnotationAgents } from '../src/ai/personas.ts';
 import {
   buildEffectiveWorkbenchSettings,
   getDifficultyInstruction,
@@ -23,7 +27,23 @@ import {
   getSequentialConversationInstruction,
 } from '../src/data/runtime-settings.ts';
 
-test('migrateLegacyAISettings preserves a legacy OpenAI setup', () => {
+const DEFAULT_MODEL_ID = 'openrouter/openai-gpt-6-1-sol';
+
+function baseSettings(overrides = {}) {
+  return {
+    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
+    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
+    activeChatModelId: DEFAULT_MODEL_ID,
+    webGrounding: false,
+    packRisk: 2,
+    packPityEnabled: true,
+    promotionFolder: 'Cards',
+    uiLanguage: 'ko',
+    ...overrides,
+  };
+}
+
+test('migrateLegacyAISettings preserves a legacy OpenAI setup and moves retired models forward', () => {
   const migrated = migrateLegacyAISettings({
     provider: 'openai',
     apiKey: 'sk-test',
@@ -37,60 +57,39 @@ test('migrateLegacyAISettings preserves a legacy OpenAI setup', () => {
   });
 
   assert.equal(migrated.providers.some((provider) => provider.id === 'openai' && provider.apiKey === 'sk-test'), true);
-  assert.equal(migrated.activeChatModelId, 'openai/gpt-4o');
+  assert.equal(migrated.activeChatModelId, 'openai/gpt-6-1-sol');
   assert.equal(migrated.webGrounding, true);
-  assert.equal(migrated.globalDifficulty, 3);
   assert.equal(migrated.packExploration, 3);
   assert.equal(migrated.packRisk, undefined);
   assert.equal(migrated.packPityEnabled, false);
   assert.equal(migrated.uiLanguage, 'en');
 });
 
-test('default annotation agents create two enabled personas across four slots', () => {
-  const agents = createDefaultAnnotationAgents('openai/gpt-5-mini');
+test('default annotation agents start with one agent on the given model', () => {
+  const agents = createDefaultAnnotationAgents('openai/gpt-6-luna');
 
-  assert.equal(agents.length, 4);
-  assert.deepEqual(agents.map((agent) => agent.enabled), [true, true, false, false]);
-  assert.equal(agents[0].personaPresetId, 'friendly-tutor');
-  assert.equal(agents[1].personaPresetId, 'skeptical-reader');
-  assert.equal(agents.every((agent) => agent.modelId === 'openai/gpt-5-mini'), true);
-  assert.equal(getPersonaPreset('film-critic').label, 'Film critic');
+  assert.equal(agents.length, 1);
+  assert.equal(agents[0].label, 'AI 1');
+  assert.equal(agents[0].modelId, 'openai/gpt-6-luna');
 });
 
 test('normalizeAISettings fills annotation defaults and language defaults', () => {
-  const normalized = normalizeAISettings({
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openrouter/openai-gpt-4o',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  });
+  const normalized = normalizeAISettings(baseSettings());
 
   assert.equal(normalized.annotationMode, 'parallel');
   assert.equal(normalized.annotationLanguageMode, 'auto-source');
   assert.equal(normalized.packLanguageMode, 'auto-source');
-  assert.equal(normalized.annotationAgents.length, 4);
-  assert.equal(normalized.annotationAgents.filter((agent) => agent.enabled).length, 2);
+  assert.equal(normalized.annotationAgents.length, 1);
+  assert.equal(normalized.annotationAgents[0].modelId, DEFAULT_MODEL_ID);
 });
 
 test('runtime settings use global annotation defaults when the codex file has no local agents', () => {
-  const settings = normalizeAISettings({
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openrouter/openai-gpt-4o',
+  const settings = normalizeAISettings(baseSettings({
     annotationMode: 'sequential',
     annotationLanguageMode: 'fixed',
     fixedAnnotationLanguage: 'en',
     packLanguageMode: 'bilingual',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  });
+  }));
 
   const runtime = buildEffectiveWorkbenchSettings(settings, {
     useGlobalDifficulty: true,
@@ -105,15 +104,15 @@ test('runtime settings use global annotation defaults when the codex file has no
   assert.equal(runtime.annotationLanguageMode, 'fixed');
   assert.equal(runtime.fixedAnnotationLanguage, 'en');
   assert.equal(runtime.packLanguageMode, 'bilingual');
-  assert.equal(runtime.annotationAgents.filter((agent) => agent.enabled).length, 2);
+  assert.equal(runtime.annotationAgents.length, 1);
 });
 
-test('difficulty and language instructions expose the v2 control semantics', () => {
+test('difficulty and language instructions expose the control semantics', () => {
   assert.match(getDifficultyInstruction(1), /elementary-school/i);
-  assert.match(getDifficultyInstruction(1), /No academic jargon/i);
-  assert.match(getDifficultyInstruction(1), /concrete everyday example/i);
+  assert.match(getDifficultyInstruction(1), /No academic/i);
+  assert.match(getDifficultyInstruction(1), /concrete real-life example/i);
   assert.match(getDifficultyInstruction(1), /1-2 short sentences/i);
-  assert.match(getDifficultyInstruction(5), /expert-level/i);
+  assert.match(getDifficultyInstruction(5), /graduate student or domain expert/i);
   assert.equal(getLanguageInstruction('fixed', 'ko', 'English'), 'Korean');
   assert.equal(getLanguageInstruction('bilingual', undefined, 'English'), 'Korean and English');
 });
@@ -122,18 +121,20 @@ test('pack difficulty keeps rarity separate from visible difficulty', () => {
   const levelOne = getPackDifficultyInstruction(1);
 
   assert.match(levelOne, /Rarity is not difficulty/i);
-  assert.match(levelOne, /young student/i);
-  assert.match(levelOne, /Do not expose engine terms/i);
-  assert.match(levelOne, /Legendary card should be a big question in simple words/i);
+  assert.match(levelOne, /elementary-school student/i);
+  assert.match(levelOne, /TOPIC of the card must match the difficulty/i);
+  assert.match(levelOne, /Legendary card is a BIG kid question/i);
 });
 
 test('sequential conversation instruction requires a real response turn', () => {
   const instruction = getSequentialConversationInstruction(1, true, true);
 
   assert.match(instruction, /Turn 2/i);
-  assert.match(instruction, /respond to one previous agent/i);
-  assert.match(instruction, /not instructions to obey/i);
-  assert.match(instruction, /final turn/i);
+  assert.match(instruction, /PUSH BACK/);
+  assert.match(instruction, /Name the previous agent/i);
+  assert.match(instruction, /FINAL turn/);
+  assert.equal(getSequentialConversationInstruction(undefined, false, false), '');
+  assert.match(getSequentialConversationInstruction(0, false, false), /You open the debate/);
 });
 
 test('migrateLegacyAISettings carries over providerKeys for alternate providers', () => {
@@ -156,305 +157,253 @@ test('migrateLegacyAISettings carries over providerKeys for alternate providers'
   const openaiProvider = migrated.providers.find((provider) => provider.id === 'openai');
   assert.ok(openaiProvider);
   assert.equal(openaiProvider.apiKey, 'sk-openai');
+  assert.equal(migrated.activeChatModelId, DEFAULT_MODEL_ID);
 });
 
-test('default built-in OpenAI Plan model uses GPT-5.4', () => {
-  const model = DEFAULT_CHAT_MODELS.find((item) => item.providerId === 'openai-plan');
+// ── 4.0 model catalog ──────────────────────────────────────────────────────
 
-  assert.ok(model);
-  assert.equal(model.id, 'openai-plan/gpt-5-4-plan');
-  assert.equal(model.label, 'GPT-5.4 (Plan)');
-  assert.equal(model.model, 'gpt-5.4');
-  assert.equal(model.supportsJsonSchema, false);
-  assert.equal(
-    DEFAULT_CHAT_MODELS.some((item) => item.id === 'openai-plan/gpt-5-2-plan'),
-    false,
-  );
+test('the default model is GPT-6.1 Sol via OpenRouter', () => {
+  assert.equal(DEFAULT_CHAT_MODELS[0].id, DEFAULT_MODEL_ID);
+  assert.equal(DEFAULT_CHAT_MODELS[0].model, 'openai/gpt-6.1-sol');
+  assert.equal(normalizeAISettings({}).activeChatModelId, DEFAULT_MODEL_ID);
 });
 
-test('normalizeAISettings migrates legacy OpenAI Plan model IDs to GPT-5.4 without duplicates', () => {
-  const migrated = normalizeAISettings({
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
+test('built-in model IDs are unique', () => {
+  const ids = DEFAULT_CHAT_MODELS.map((model) => model.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('plan catalogs ship the current Claude, GPT, and Gemini models', () => {
+  const byProvider = (providerId) =>
+    DEFAULT_CHAT_MODELS.filter((model) => model.providerId === providerId).map((model) => model.model);
+
+  assert.deepEqual(byProvider('anthropic-plan'), [
+    'sonnet',
+    'opus',
+    'haiku',
+    'fable',
+    'claude-opus-5-5',
+    'claude-sonnet-5-5',
+    'claude-fable-5-1',
+  ]);
+  assert.deepEqual(byProvider('openai-plan'), ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5.6-sol']);
+  assert.deepEqual(byProvider('gemini-plan'), ['gemini-3.1-pro-high', 'gemini-3.8-flash-medium']);
+  assert.equal(DEFAULT_CHAT_MODELS.some((model) => /gpt-5\.5|claude-.*-4-5-plan|gemini-2/.test(model.id)), false);
+});
+
+test('Claude 4.6+ catalog entries use adaptive effort instead of a token budget', () => {
+  for (const id of ['anthropic/claude-opus-5-5', 'anthropic/claude-sonnet-5-5', 'anthropic-plan/claude-opus-5-5-plan']) {
+    const model = DEFAULT_CHAT_MODELS.find((item) => item.id === id);
+    assert.ok(model, id);
+    assert.equal(model.thinking?.effort, 'medium', id);
+    assert.equal(model.thinking?.budget_tokens, undefined, id);
+  }
+});
+
+test('every retired model maps to a model that still ships', () => {
+  const shipped = new Set(DEFAULT_CHAT_MODELS.map((model) => model.id));
+  for (const [retired, replacement] of Object.entries(RETIRED_MODEL_REPLACEMENTS)) {
+    assert.equal(shipped.has(retired), false, `${retired} is still shipped`);
+    assert.equal(shipped.has(replacement), true, `${retired} -> ${replacement} does not ship`);
+  }
+  assert.equal(replaceRetiredModelId('my-custom/model'), 'my-custom/model');
+});
+
+test('normalizeAISettings moves retired selections forward and is repeatable', () => {
+  const stored = baseSettings({
+    activeChatModelId: 'openai-plan/gpt-5-5-plan',
     chatModels: [
-      ...structuredClone(DEFAULT_CHAT_MODELS).filter((item) => item.id !== 'openai-plan/gpt-5-4-plan'),
+      ...structuredClone(DEFAULT_CHAT_MODELS),
       {
-        id: 'openai-plan/gpt-5-2-plan',
+        id: 'openai-plan/gpt-5-5-plan',
         providerType: 'openai-plan',
         providerId: 'openai-plan',
-        label: 'GPT-5.2 (Plan)',
-        model: 'gpt-5.2',
+        label: 'GPT-5.5 (Plan)',
+        model: 'gpt-5.5',
         supportsGrounding: false,
         supportsJsonSchema: false,
         supportsJsonObject: true,
         supportsAnnotations: false,
       },
     ],
-    activeChatModelId: 'openai-plan/gpt-5-2-plan',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
+    annotationAgents: [
+      { id: 'agent-1', label: 'AI 1', modelId: 'anthropic-plan/claude-sonnet-4-5-plan', order: 1 },
+      { id: 'agent-2', label: 'AI 2', modelId: 'gemini-plan/gemini-3-pro-preview-plan', order: 2 },
+      { id: 'agent-3', label: 'Mine', modelId: 'custom/my-model', order: 3 },
+    ],
   });
 
-  assert.equal(migrated.activeChatModelId, 'openai-plan/gpt-5-4-plan');
-  assert.equal(
-    migrated.chatModels.some((item) => item.id === 'openai-plan/gpt-5-2-plan'),
-    false,
-  );
+  const once = normalizeAISettings(stored);
+  // GPT-5.6 Sol is verified on the OpenAI Plan connection; GPT-6 may be gated.
+  assert.equal(once.activeChatModelId, 'openai-plan/gpt-5-6-sol-plan');
+  assert.equal(once.chatModels.some((model) => model.id === 'openai-plan/gpt-5-5-plan'), false);
+  assert.deepEqual(once.annotationAgents.map((agent) => agent.modelId), [
+    'anthropic-plan/claude-sonnet-latest-plan',
+    'gemini-plan/gemini-3-1-pro-high-plan',
+    'custom/my-model',
+  ]);
 
-  const openaiPlanModels = migrated.chatModels.filter((item) => item.providerId === 'openai-plan');
-  assert.equal(openaiPlanModels.filter((item) => item.id === 'openai-plan/gpt-5-4-plan').length, 1);
+  const twice = normalizeAISettings(once);
+  assert.deepEqual(twice, once);
 });
 
-test('resolveActiveChatModel returns provider and model metadata for a valid active model', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openrouter/openai-gpt-4o',
-    webGrounding: true,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
+test('stored copies of built-in models cannot override the shipped catalog', () => {
+  const stale = structuredClone(DEFAULT_CHAT_MODELS).map((model) =>
+    model.id === 'openai-plan/gpt-6-1-sol-plan' ? { ...model, label: 'Old label', model: 'gpt-5.5' } : model,
+  );
+  const normalized = normalizeAISettings(baseSettings({ chatModels: stale }));
+  const model = normalized.chatModels.find((item) => item.id === 'openai-plan/gpt-6-1-sol-plan');
 
-  const openrouterProvider = settings.providers.find((provider) => provider.id === 'openrouter');
-  openrouterProvider.apiKey = 'sk-or-test';
+  assert.equal(model.label, 'GPT-6.1 Sol (Plan)');
+  assert.equal(model.model, 'gpt-6.1-sol');
+});
+
+test('custom models survive normalization', () => {
+  const custom = {
+    id: 'openai/my-finetune',
+    providerType: 'openai',
+    providerId: 'openai',
+    label: 'My fine-tune',
+    model: 'ft:gpt-6-luna:me',
+    supportsGrounding: false,
+    supportsJsonSchema: true,
+    supportsJsonObject: true,
+    supportsAnnotations: false,
+  };
+  const normalized = normalizeAISettings(baseSettings({ chatModels: [...structuredClone(DEFAULT_CHAT_MODELS), custom] }));
+
+  const stored = normalized.chatModels.find((model) => model.id === custom.id);
+  assert.ok(stored);
+  assert.equal(stored.label, custom.label);
+  assert.equal(stored.model, custom.model);
+});
+
+test('.codex agents naming retired models are repaired on load', () => {
+  const agents = normalizeAnnotationAgents(
+    [{ id: 'a', label: 'Reader', modelId: 'openai/gpt-5-mini', order: 1 }],
+    DEFAULT_MODEL_ID,
+    { withDefaults: false },
+  );
+
+  assert.equal(agents[0].modelId, 'openai/gpt-6-luna');
+});
+
+// ── Execution state ───────────────────────────────────────────────────────
+
+test('resolveActiveChatModel returns provider and model metadata for a valid active model', () => {
+  const settings = baseSettings();
+  settings.providers.find((provider) => provider.id === 'openrouter').apiKey = 'sk-or-test';
 
   const resolved = resolveActiveChatModel(settings);
 
   assert.ok(resolved);
   assert.equal(resolved.provider.id, 'openrouter');
-  assert.equal(resolved.model.id, 'openrouter/openai-gpt-4o');
+  assert.equal(resolved.model.id, DEFAULT_MODEL_ID);
   assert.equal(canExecuteActiveModel(settings), true);
 });
 
 test('model-specific execution helpers resolve non-active annotation models', () => {
-  const settings = normalizeAISettings({
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openrouter/openai-gpt-4o',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  });
+  const settings = normalizeAISettings(baseSettings());
+  settings.providers.find((provider) => provider.id === 'openai').apiKey = 'sk-openai-test';
 
-  const openaiProvider = settings.providers.find((provider) => provider.id === 'openai');
-  openaiProvider.apiKey = 'sk-openai-test';
-
-  const resolved = resolveChatModelById(settings, 'openai/gpt-5-mini');
-  const state = getModelExecutionState(settings, 'openai/gpt-5-mini');
-  const config = buildAIConfigForModel(settings, 'openai/gpt-5-mini');
+  const resolved = resolveChatModelById(settings, 'openai/gpt-6-luna');
+  const state = getModelExecutionState(settings, 'openai/gpt-6-luna');
+  const config = buildAIConfigForModel(settings, 'openai/gpt-6-luna');
 
   assert.ok(resolved);
-  assert.equal(resolved.model.id, 'openai/gpt-5-mini');
+  assert.equal(resolved.model.id, 'openai/gpt-6-luna');
   assert.equal(state.canExecute, true);
   assert.ok(config);
-  assert.equal(config.modelId, 'gpt-5-mini');
+  assert.equal(config.modelId, 'gpt-6-luna');
   assert.equal(config.providerId, 'openai');
 });
 
 test('resolveActiveChatModel falls back when the active model is missing', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'missing-model',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
-
-  const resolved = resolveActiveChatModel(settings);
+  const resolved = resolveActiveChatModel(baseSettings({ activeChatModelId: 'missing-model' }));
 
   assert.ok(resolved);
-  assert.equal(resolved.model.id, 'openrouter/openai-gpt-4o');
+  assert.equal(resolved.model.id, DEFAULT_MODEL_ID);
 });
 
-test('canExecuteActiveModel rejects providers that require credentials but have none', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openai/gpt-5',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
+test('API-key models without a key cannot run and say why', () => {
+  const settings = baseSettings({ activeChatModelId: 'openai/gpt-6-1-sol' });
 
   assert.equal(canExecuteActiveModel(settings), false);
-});
-
-test('getActiveModelExecutionState explains when an API-key model is missing credentials', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openai/gpt-5',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
-
   const state = getActiveModelExecutionState(settings);
-
   assert.equal(state.canExecute, false);
   assert.equal(state.code, 'missing_api_key');
 });
 
-test('getActiveModelExecutionState explains when a plan model is missing OAuth', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openai-plan/gpt-5-4-plan',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
-
-  const state = getActiveModelExecutionState(settings);
-
-  assert.equal(state.canExecute, false);
-  assert.equal(state.code, 'missing_oauth');
-});
-
-test('openai-plan OAuth access token is enough for execution without generated API keys', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openai-plan/gpt-5-4-plan',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
-
-  const provider = settings.providers.find((item) => item.id === 'openai-plan');
-  provider.oauth = {
-    accessToken: 'oauth-access-token',
-    refreshToken: 'refresh-token',
-    expiresAt: Date.now() + 60_000,
-  };
-
-  const state = getActiveModelExecutionState(settings);
-
-  assert.equal(state.canExecute, true);
-  assert.equal(state.code, 'ready');
-
-  const config = buildAIConfig(settings);
-  assert.ok(config);
-  assert.equal(config.authToken, 'oauth-access-token');
-  assert.equal(config.supportsJsonSchema, false);
-});
-
-test('buildAIConfig uses OAuth access token for openai-plan execution', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openai-plan/gpt-5-4-plan',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
-
-  const provider = settings.providers.find((item) => item.id === 'openai-plan');
-  provider.oauth = {
-    accessToken: 'oauth-access-token',
-    refreshToken: 'refresh-token',
-    expiresAt: Date.now() + 60_000,
-  };
-
-  const config = buildAIConfig(settings);
-
-  assert.ok(config);
-  assert.equal(config.providerType, 'openai-plan');
-  assert.equal(config.authToken, 'oauth-access-token');
-});
-
-test('openai-plan expired access token stays executable when a refresh token exists', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openai-plan/gpt-5-4-plan',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
-
-  const provider = settings.providers.find((item) => item.id === 'openai-plan');
-  provider.oauth = {
-    accessToken: 'oauth-access-token',
-    refreshToken: 'refresh-token',
-    expiresAt: Date.now() - 60_000,
-  };
-
-  const state = getActiveModelExecutionState(settings);
-
-  assert.equal(state.canExecute, true);
-  assert.equal(state.code, 'ready');
-});
-
-test('openai-plan without both access and refresh token requires reconnect', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'openai-plan/gpt-5-4-plan',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
-  };
-
-  const provider = settings.providers.find((item) => item.id === 'openai-plan');
-  provider.oauth = {
-    accessToken: '',
-    refreshToken: '',
-  };
-
-  const state = getActiveModelExecutionState(settings);
+test('an OpenAI Plan model without OAuth asks to connect', () => {
+  const state = getActiveModelExecutionState(baseSettings({ activeChatModelId: 'openai-plan/gpt-6-1-sol-plan' }));
 
   assert.equal(state.canExecute, false);
   assert.equal(state.code, 'missing_oauth');
   assert.match(state.message, /Connect the active plan provider/i);
 });
 
-test('gemini-plan still uses its OAuth access token directly', () => {
-  const settings = {
-    providers: structuredClone(DEFAULT_PROVIDER_CATALOG),
-    chatModels: structuredClone(DEFAULT_CHAT_MODELS),
-    activeChatModelId: 'gemini-plan/gemini-3-pro-preview-plan',
-    webGrounding: false,
-    packRisk: 2,
-    packPityEnabled: true,
-    promotionFolder: 'Cards',
-    uiLanguage: 'ko',
+test('an OpenAI Plan access token is enough to run', () => {
+  const settings = baseSettings({ activeChatModelId: 'openai-plan/gpt-6-1-sol-plan' });
+  settings.providers.find((item) => item.id === 'openai-plan').oauth = {
+    accessToken: 'oauth-access-token',
+    refreshToken: 'refresh-token',
+    expiresAt: Date.now() + 600_000,
   };
 
-  const provider = settings.providers.find((item) => item.id === 'gemini-plan');
-  provider.oauth = {
-    accessToken: 'gemini-oauth-token',
-    refreshToken: 'refresh-token',
-    expiresAt: Date.now() + 60_000,
-    email: 'user@example.com',
-  };
+  const state = getActiveModelExecutionState(settings);
+  assert.equal(state.canExecute, true);
+  assert.equal(state.code, 'ready');
 
   const config = buildAIConfig(settings);
-
   assert.ok(config);
-  assert.equal(config.providerType, 'gemini-plan');
-  assert.equal(config.authToken, 'gemini-oauth-token');
+  assert.equal(config.providerType, 'openai-plan');
+  assert.equal(config.authToken, 'oauth-access-token');
+  assert.equal(config.supportsJsonSchema, false);
+});
+
+test('an expired OpenAI Plan token stays runnable while a refresh token exists', () => {
+  const settings = baseSettings({ activeChatModelId: 'openai-plan/gpt-6-1-sol-plan' });
+  settings.providers.find((item) => item.id === 'openai-plan').oauth = {
+    accessToken: 'oauth-access-token',
+    refreshToken: 'refresh-token',
+    expiresAt: Date.now() - 60_000,
+  };
+
+  const state = getActiveModelExecutionState(settings);
+  assert.equal(state.canExecute, true);
+  assert.equal(state.code, 'ready');
+});
+
+test('Claude and Gemini Plan run through the desktop CLIs without stored tokens', () => {
+  for (const type of ['anthropic-plan', 'gemini-plan']) {
+    const definition = getProviderDefinition(type);
+    assert.equal(definition.authStrategy, 'native-runtime', type);
+    assert.equal(definition.requiresApiKey, false, type);
+    assert.equal(definition.defaultBaseUrl ?? '', '', type);
+  }
+
+  const settings = baseSettings({ activeChatModelId: 'anthropic-plan/claude-sonnet-latest-plan' });
+  const state = getActiveModelExecutionState(settings);
+  assert.equal(state.canExecute, true);
+  assert.equal(state.code, 'ready');
+
+  const config = buildAIConfig(settings);
+  assert.ok(config);
+  assert.equal(config.providerType, 'anthropic-plan');
+  assert.equal(config.modelId, 'sonnet');
+  assert.equal(config.authToken, undefined);
+
+  const provider = settings.providers.find((item) => item.id === 'gemini-plan');
+  assert.match(getProviderConnectionSummary(provider), /Antigravity CLI on this computer/);
+});
+
+test('native Plan models report unsupported_platform on mobile', () => {
+  setNativeRuntimeAvailability(false);
+  try {
+    const state = getActiveModelExecutionState(baseSettings({ activeChatModelId: 'gemini-plan/gemini-3-8-flash-medium-plan' }));
+    assert.equal(state.canExecute, false);
+    assert.equal(state.code, 'unsupported_platform');
+  } finally {
+    setNativeRuntimeAvailability(true);
+  }
 });

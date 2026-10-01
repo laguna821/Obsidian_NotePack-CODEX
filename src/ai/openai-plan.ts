@@ -1,4 +1,4 @@
-import type { AIOAuthState } from "../types";
+import type { AIOAuthState, AIReasoningEffort } from "../types";
 
 export interface OpenAIPlanChatMessage {
   role: "system" | "user" | "assistant";
@@ -10,7 +10,7 @@ export interface OpenAIPlanRequestOptions {
   messages: OpenAIPlanChatMessage[];
   temperature?: number;
   response_format?: Record<string, unknown>;
-  reasoning_effort?: "low" | "medium" | "high";
+  reasoning_effort?: AIReasoningEffort;
   reasoning_summary?: string;
   stream?: boolean;
 }
@@ -198,6 +198,7 @@ export function parseOpenAIPlanCodexSse(payload: string): { content: string; ann
   let deltaText = "";
   let finalResponse: Record<string, unknown> | undefined;
   let lastErrorMessage = "";
+  let failed = false;
 
   for (const event of parseSseJsonEvents(payload)) {
     switch (event.type) {
@@ -210,6 +211,13 @@ export function parseOpenAIPlanCodexSse(payload: string): { content: string; ann
       case "response.incomplete":
         finalResponse = asRecord(event.response) ?? finalResponse;
         break;
+      case "response.failed": {
+        failed = true;
+        const failedError = asRecord(asRecord(event.response)?.error);
+        lastErrorMessage =
+          typeof failedError?.message === "string" ? failedError.message : "OpenAI Plan request failed.";
+        break;
+      }
       case "error":
         lastErrorMessage =
           typeof asRecord(event.error)?.message === "string"
@@ -221,6 +229,8 @@ export function parseOpenAIPlanCodexSse(payload: string): { content: string; ann
     }
   }
 
+  // A failed response may have streamed a partial answer; never return it.
+  if (failed) throw new Error(lastErrorMessage);
   const content = extractResponseOutputText(finalResponse) || deltaText.trim();
   if (!content) {
     throw new Error(lastErrorMessage || "No content in OpenAI Plan response");
@@ -232,10 +242,14 @@ export function parseOpenAIPlanCodexSse(payload: string): { content: string; ann
   };
 }
 
+// Refresh a minute early so a request does not start with a token that
+// expires in flight.
+const REFRESH_SKEW_MS = 60_000;
+
 function hasUsableAccessToken(oauth: AIOAuthState, now: number): boolean {
   if (!oauth.accessToken) return false;
   if (oauth.expiresAt === undefined) return true;
-  return oauth.expiresAt > now;
+  return oauth.expiresAt > now + REFRESH_SKEW_MS;
 }
 
 export async function resolveOpenAIPlanOAuth(options: {

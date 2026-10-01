@@ -1,4 +1,4 @@
-# NotePack CODEX v3.0.3
+# NotePack CODEX v4.0.0
 
 <img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
 
@@ -6,12 +6,14 @@
 
 **NotePack CODEX** is an Obsidian plugin that turns scattered memos into a bottom-up writing workbench. AI personas debate and annotate your notes in the background, and when your thinking stalls, a Hearthstone-style **idea card pack** forces you into angles you would not have picked yourself.
 
-Key features in v3:
+Key features:
 
+- **Use your subscriptions (v4)** — on desktop, connect ChatGPT through a browser login, and Claude and Gemini through the official Claude Code and Antigravity CLIs installed on your computer. NotePack never stores Claude or Google sign-in tokens. API keys (BYOK) work everywhere, including mobile.
+- **Claude Team/Enterprise (v4)** — organization accounts work after an explicit opt-in on each computer.
+- **Current models (v4)** — GPT-6.1 Sol, Claude Opus 5.5 / Sonnet 5.5 / Fable 5.1, Gemini 3.8 Flash / 3.1 Pro.
 - **Multi-seed cardpacks** — pick several notes via multi-select and draw cards that synthesize cross-seed context.
 - **Offline capture mode** — toggle AI off and just dump memos; AI catches up later.
 - **Batch AI annotation** — multi-select cards and run annotations with a concurrency-3 queue, retry-aware.
-- **Plan mode trio** — OpenAI / Claude / Gemini all formally validated; bring your own API keys (BYOK).
 - **Quantum metacognition cardpacks** — five rarity tiers tuned by your set grade level.
 
 NotePack CODEX operates on `.codex` files inside your vault, kept separate from regular markdown so the AI-enriched workbench does not pollute your notes. Promote favorite cards into proper markdown notes when they are ready.
@@ -43,6 +45,24 @@ The Korean documentation below is the canonical version maintained by the author
 
 ---
 
+## ✨ v4.0.0 변경 한눈에
+
+**Claude·Gemini Plan을 공식 CLI 실행 방식으로 전환**하고, **Claude Team/Enterprise 계정**을 쓸 수 있게 했으며, **모델 목록을 2026년 10월 기준으로 갱신**한 메이저 업데이트입니다.
+
+| 분류 | v4.0.0 |
+|---|---|
+| 🤖 Claude Plan | 이 컴퓨터에 설치한 **Claude Code**로 실행. NotePack이 Claude 로그인 토큰을 직접 다루지 않음 |
+| 🏢 Team/Enterprise | 조직 계정은 고지 확인 후 **컴퓨터별로 허용**하면 사용 가능 (기본은 차단) |
+| 💎 Gemini Plan | 이 컴퓨터에 설치한 **Antigravity CLI(`agy`)** 로 실행. 연결 확인 때 Gemini 모델 목록 자동 반영 |
+| 🟢 OpenAI Plan | **GPT-6.1 Sol** 등 GPT-6 계열 추가. GPT-5.5(2026-10-14 종료) 선택은 이 연결에서 검증된 GPT-5.6 Sol로 이동. 토큰 갱신이 저장되지 않던 버그 수정 |
+| 🧠 모델 | Claude Opus 5.5·Sonnet 5.5·Fable 5.1, GPT-6.1 Sol·GPT-6 Astra·GPT-6 Luna, Gemini 3.8 Flash·3.1 Pro — 종료된 모델 선택은 자동 이동 |
+| 🔐 보안 | 저장돼 있던 Claude·Gemini Plan 토큰과 내장 Google OAuth 시크릿 제거, API 키·게이트웨이 과금 경로 자동 차단 |
+| 🛑 취소 | 카드 팩·통합 인사이트 생성 중 창을 닫으면 요청과 CLI 프로세스도 함께 중단 |
+
+> 자세한 내용은 [RELEASE_NOTES_4.0.0.md](RELEASE_NOTES_4.0.0.md), 연결 방법은 아래 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 보세요.
+
+---
+
 ## ✨ v3.0.0 신규 기능 한눈에
 
 **멀티 시드 카드팩**, **오프라인 캡처 모드**, **멀티 셀렉트 일괄 AI 주석** 세트 신규 + **Plan mode 3종(OpenAI / Claude / Gemini) 정식 완성** + **Gemini Plan 안정성·셀렉션 UX 전면 강화**.
@@ -64,7 +84,7 @@ The Korean documentation below is the canonical version maintained by the author
 | **v2.1.0** | 보드 카드 크기 4단계(S/M/L/XL), 즐겨찾기 상단 영구 고정, 우측 Inspector 패널 접기/펴기, 설정 메뉴 UX 정리, Google Keep 스타일 메모 편집기 |
 | **v2.2.0** | 커스텀 에이전트 전면 리뉴얼(커스텀 프롬프트), 1~10개 동시 주석, Gemini CLI Plan mode 검증 |
 
-> v3.0.0 변경 디테일은 [RELEASE_NOTES_3.0.0.md](RELEASE_NOTES_3.0.0.md) 참고. v2.0.0 base 기능들은 아래 섹션들에 그대로 문서화되어 있고 v3.0.0에서도 유효합니다.
+> v3.0.0 변경 디테일은 [RELEASE_NOTES_3.0.0.md](RELEASE_NOTES_3.0.0.md) 참고. v2.0.0 base 기능들은 아래 섹션들에 그대로 문서화되어 있고 v4.0.0에서도 유효합니다. 단, Plan 연결 방식과 모델 목록은 v4.0.0에서 바뀌었으니 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 기준으로 보세요.
 
 ---
 
@@ -206,23 +226,64 @@ Inspector의 **"별도 창"** 버튼으로 한 카드를 옵시디언 별도 윈
 
 ---
 
-## 🧬 AI 모델 지원 (BYOK + OAuth Plan)
+## 🧬 AI 모델 지원 (API 키 + 구독 Plan)
 
-본 플러그인은 AI 연동 없이는 동작하지 않지만, **별도 API 충전 없이도 유료 구독으로 인증 가능**한 OAuth Plan 흐름을 제공합니다 (Smart Composer 영감).
+본 플러그인은 AI 연동 없이는 동작하지 않습니다. API 키(BYOK)로 쓰거나, 별도 API 충전 없이 **이미 쓰고 있는 구독**으로 연결할 수 있습니다. 구독 Plan 연결은 **데스크톱 전용**이고, 모바일에서는 API 키 제공자를 쓰면 됩니다.
 
-### OAuth Plan (구독 인증)
+### 구독 Plan 연결 (v4.0.0)
 
-| Provider | 인증 방식 | v2 기본 모델 |
+| Plan | 연결 방식 | 기본 제공 모델 |
 |---|---|---|
-| **OpenAI Plan** (ChatGPT 구독) | PKCE-only OAuth | **GPT-5.5 (Plan)** |
-| **Claude Plan** (Anthropic 구독) | PKCE-only OAuth | Claude Sonnet 4.5 (Plan) |
-| **Gemini Plan** | **BYO OAuth** (사용자가 GCP 콘솔에서 자신의 OAuth Desktop 클라이언트 발급 → Client ID/Secret 입력) | Gemini 3 Pro Preview (Plan) |
+| **OpenAI Plan** (ChatGPT 구독) | 브라우저 로그인 (Codex OAuth, PKCE) | **GPT-6.1 Sol**, GPT-6 Sol, GPT-6 Astra, GPT-6 Luna, GPT-5.6 Sol |
+| **Claude Plan** (Claude Pro·Max, 허용 시 Team·Enterprise) | 이 컴퓨터에 설치한 **Claude Code** | Sonnet·Opus·Haiku·Fable 최신(latest), Opus 5.5, Sonnet 5.5, Fable 5.1 |
+| **Gemini Plan** (Google 계정) | 이 컴퓨터에 설치한 **Antigravity CLI (`agy`)** | Gemini 3.1 Pro (High), Gemini 3.8 Flash (Medium), 연결 확인 때 발견된 Gemini 모델 |
 
-> ⚠️ **v2.0.0 보안 변경**: v1.x는 Gemini OAuth용 client_secret이 plugin 코드에 평문으로 박혀 있어 OSS 배포 시 누구나 추출 가능했습니다. v2.0.0에서 시크릿 완전 제거, 사용자가 GCP 콘솔에서 자기 OAuth 클라이언트(Desktop App)를 발급받아 Client ID + Secret을 settings에 입력하는 BYO 방식으로 전환. v1.x에서 Gemini Plan 토큰을 갖고 있던 사용자는 v2 첫 실행 시 자동 무효화 + Notice 안내됩니다.
+**OpenAI Plan 연결**
+
+설정 → 플랜 연결 → OpenAI 카드의 **연결**을 누르고 브라우저에서 ChatGPT 계정으로 로그인하면 자동으로 연결됩니다. 자동 연결이 안 되면 브라우저 주소창의 redirect URL을 붙여 넣는 수동 연결도 있습니다. 로그인 콜백은 공식 Codex CLI와 같은 `127.0.0.1:1455`(사용 중이면 `1457`)를 씁니다.
+
+GPT-5.6 Sol은 이 연결 경로에서 동작이 확인된 모델이고, OpenAI 문서상 GPT-6 출시 기간에도 계속 제공됩니다. 그래서 종료되는 GPT-5.5 선택은 GPT-5.6 Sol로 옮기고, GPT-6.1 Sol은 목록 맨 위에서 직접 고르도록 했습니다. OpenAI가 GPT-6 계열을 "새 Codex 버전 필요" 오류로 거부하면 오류 메시지가 GPT-5.6 Sol로 바꾸라고 안내합니다.
+
+**Claude Plan 준비**
+
+1. Claude Code를 설치합니다 ([설치 안내](https://code.claude.com/docs/en/installation)).
+2. 설정 → 플랜 연결 → Claude 카드에서 **로그인 터미널 열기**를 누르고, 열린 터미널에서 Claude 구독 계정으로 로그인합니다.
+3. **연결 확인**을 누릅니다. 상태가 "사용 가능"이면 준비 끝입니다.
+
+- Opus 5.5·Sonnet 5.5 고정 항목은 Claude Code 2.1.280 이상, Fable 5.1은 2.1.257 이상이 필요합니다. "최신(latest)" 항목은 설치된 Claude Code가 아는 최신 모델을 씁니다.
+- NotePack은 Claude Code를 도구·MCP 서버·사용자 설정 없이 한 번짜리 요청으로만 실행합니다.
+
+**Team / Enterprise 계정**
+
+조직 계정은 기본적으로 막혀 있습니다. 조직 관리자가 적용한 Claude Code 설정(hooks, 환경 변수, 권한, MCP 서버 등)이 NotePack 요청에도 적용될 수 있기 때문입니다. Claude 카드의 **Team/Enterprise 계정 허용…** 버튼에서 고지를 확인하고 허용하면 그 컴퓨터에서 쓸 수 있습니다.
+
+- 허용 여부는 동기화되는 vault 설정이 아니라 **각 컴퓨터에 따로** 저장되고, 언제든 해제할 수 있습니다.
+- 사용량은 조직 좌석과 조직의 추가 사용량 정책을 따릅니다. 예를 들어 Team Standard 좌석에서 Fable은 사용량 크레딧으로만 동작합니다.
+- 허용한 조직 계정이라도 Claude Code가 세션 설정을 보고하지 않거나 MCP 서버가 붙으면 그 응답은 버립니다.
+
+**Gemini Plan 준비**
+
+1. Antigravity CLI를 설치합니다 ([설치 안내](https://antigravity.google/docs/cli/install)).
+2. 설정 → 플랜 연결 → Gemini 카드에서 **로그인 터미널 열기**를 누르고, 브라우저에서 Google 계정으로 로그인합니다.
+3. **연결 확인**을 누릅니다. Antigravity가 알려 주는 Gemini 모델이 모델 목록에 자동으로 추가됩니다.
+
+- Windows에서는 명령줄 길이 제한 때문에 한 요청에 약 24,000자까지 보낼 수 있습니다. 더 긴 입력은 Gemini API 키 제공자를 쓰세요.
+
+**과금 안전장치**
+
+Claude·Gemini Plan은 구독 로그인으로만 실행됩니다. 아래처럼 API 키·게이트웨이·클라우드 과금 경로가 보이면 요청을 보내지 않고 설정 화면에 이유를 표시합니다.
+
+- `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_CLOUD_PROJECT` 같은 환경 변수가 설정된 경우. 이 값들은 CLI에도 넘기지 않습니다.
+- `claude auth status`가 API 키나 클라우드 제공자 과금을 보고하는 경우.
+- 개인(Pro·Max) 계정인데 이 컴퓨터에 관리자용 Claude Code 관리 설정(managed settings, 정책 레지스트리)이 있는 경우.
+
+> ⚖️ Claude Plan은 각자 본인 로그인으로 Claude Code를 실행하는 **개인 사용 호환 경로**이며 Anthropic 공식 연동이 아닙니다. NotePack은 Claude·Google 로그인 토큰을 읽거나 저장하지 않습니다.
 
 ### 단순 API Key (Direct API)
 
 OAuth가 부담스러우면 일반 API Key 모드도 그대로 지원: OpenAI / Anthropic / Gemini (AI Studio) / xAI / DeepSeek / Mistral / Perplexity / OpenRouter / Azure OpenAI / Ollama / LM Studio.
+
+v4.0.0 기본 목록은 Anthropic(Claude Opus 5.5, Sonnet 5.5, Fable 5.1, Haiku 4.5), OpenAI(GPT-6.1 Sol, GPT-6 Astra, GPT-6 Luna), Gemini(3.8 Flash, 3.1 Pro Preview, 3.5 Flash-Lite), OpenRouter(GPT-6.1 Sol, Claude Sonnet 5.5, Gemini 3.8 Flash), xAI(Grok 4.7, Grok 4.3), DeepSeek(V4.1 Flash, V4 Pro)입니다. Claude 4.6 이후 모델은 thinking 예산 대신 **effort(low~max)** 로 조절합니다.
 
 ### 페르소나 (커스텀 가능)
 
@@ -236,10 +297,10 @@ OAuth가 부담스러우면 일반 API Key 모드도 그대로 지원: OpenAI / 
 
 v1.x는 AI 호출에 어떤 throttle도 없어 카드 다발 입력 시 quota 폭주 위험이 있었습니다. v2.0.0에서:
 
-- **Per-provider 동시성 제한** (공식 API 2건, Plan 엔드포인트 1건)
-- **최소 호출 간격** (공식 API 2초, Plan 6초)
-- **429/503/네트워크 오류 자동 재시도** — `Retry-After` 헤더 존중, exponential backoff + jitter
-- **AbortController 풀 와이어링** — 카드 삭제·문서 닫힘·재분석 트리거 시 in-flight 요청 즉시 중단
+- **Per-provider 동시성 제한** (공식 API 2건, Plan 1건)
+- **최소 호출 간격** (공식 API 2초, OpenAI Plan 6초. Claude·Gemini Plan은 CLI를 한 번에 하나씩 실행)
+- **429/503/네트워크 오류 자동 재시도** — `Retry-After` 헤더 존중, exponential backoff + jitter. Claude·Gemini Plan은 구독 사용량을 지키기 위해 자동 재시도하지 않음
+- **AbortController 풀 와이어링** — 카드 삭제·문서 닫힘·재분석 트리거 시 in-flight 요청 즉시 중단. v4.0.0부터 카드 팩 창·통합 인사이트도 포함하며, 실행 중인 CLI 프로세스도 함께 종료
 - **Synthesis debounce 500ms** — 카드 상태 변경마다 호출되던 fan-out 차단
 
 429 발생 시 카드 statusText에 표시 + 분당 1회 Notice 알림 (스팸 방지).
@@ -257,11 +318,32 @@ v1.x는 AI 호출에 어떤 throttle도 없어 카드 다발 입력 시 quota �
 
 ## 📦 설치
 
-[GitHub Releases](https://github.com/Achmage/achmage-notepack-codex/releases)에서 **v3.0.0** zip 다운로드 → `<vault>/.obsidian/plugins/achmage-notepack-codex/`에 압축 풀기 → 옵시디언 Settings → 커뮤니티 플러그인 → 활성화.
+[GitHub Releases](https://github.com/laguna821/Obsidian_NotePack-CODEX/releases)에서 **v4.0.0**의 `main.js` / `manifest.json` / `styles.css` 3개 파일을 받아 `<vault>/.obsidian/plugins/achmage-notepack-codex/`에 넣기 → 옵시디언 Settings → 커뮤니티 플러그인 → 활성화.
+
+Claude·Gemini Plan을 쓰려면 위 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절의 준비 단계(Claude Code / Antigravity CLI 설치와 로그인)를 함께 진행하세요.
 
 ⚠️ **Dropbox 안 vault 사용자 주의**: vault 자체가 Dropbox로 sync되는 경우 plugin 업데이트 시 sync race로 옵시디언이 캐시된 구 main.js를 메모리에 잡는 케이스가 확인됐습니다. 새 빌드를 덮어쓴 뒤에는 NotePack CODEX 플러그인 OFF→5초→ON으로 강제 리로드 (또는 시스템 트레이의 옵시디언 완전 종료 후 재시작). 만성 재발 시 plugin 폴더만 Dropbox 밖에 두고 junction(symlink)으로 묶는 방법이 가장 안정적.
 
 또는 BRAT plugin으로 베타 트랙 설치도 가능.
+
+---
+
+## ⚠️ v3.x → v4.0.0 마이그레이션 안내
+
+v4.0.0 첫 실행 시 자동으로 처리됩니다:
+
+1. Claude Plan·Gemini Plan에 저장돼 있던 로그인 토큰과 Gemini BYO OAuth Client ID/Secret을 **삭제**하고 Notice로 안내합니다. 두 Plan은 이제 Claude Code와 Antigravity CLI의 로그인을 씁니다. OpenAI Plan 연결은 그대로 유지됩니다.
+2. 종료·교체된 모델을 쓰던 선택을 후속 모델로 옮깁니다. 활성 모델, 주석 에이전트, `.codex` 파일 안의 에이전트가 모두 대상입니다.
+   - GPT-5.5 등 GPT-5.x (Plan) → GPT-5.6 Sol (Plan). 이 연결에서 검증된 모델이며, GPT-6.1 Sol은 직접 선택
+   - Claude 4.5 계열 (Plan) → 같은 계열의 최신(latest) 항목
+   - Gemini Plan 구 모델 → Antigravity 모델 (Gemini 3.1 Pro High / 3.8 Flash Medium)
+   - OpenRouter GPT-4o, OpenAI GPT-4o·GPT-5 계열, Anthropic 4.5 계열, Gemini 2.5 계열 API 모델 → 현행 모델
+   - 종료된 xAI Grok 4.1 Fast → Grok 4.3, DeepSeek Chat·Reasoner → DeepSeek V4.1 Flash
+3. 내장 모델 항목은 항상 최신 카탈로그를 따릅니다. 예전 버전이 저장한 내장 항목 사본이 라벨이나 모델 ID를 덮어쓰지 않습니다. 직접 추가한 모델은 그대로 둡니다.
+
+이 정리는 로드할 때마다 다시 확인합니다. Dropbox 등으로 동기화되는 다른 기기의 3.x가 예전 값을 다시 써도 4.0.0이 다음 로드에서 다시 정리합니다. 그래도 모든 기기를 4.0.0으로 올리는 것을 권장합니다.
+
+⚠️ **사용자가 직접 처리하면 좋은 항목**: 3.x의 `data.json`에는 Claude·Gemini Plan 토큰이 평문으로 저장돼 있었습니다. 4.0.0이 지워도 Dropbox 버전 기록이나 백업에 예전 파일이 남아 있을 수 있습니다. 걱정되면 Claude·Google 계정 보안 설정에서 해당 로그인 세션을 해제하고, 3.x에서 직접 만든 Gemini BYO OAuth 클라이언트가 있다면 GCP 콘솔에서 삭제하거나 시크릿을 재발급하세요.
 
 ---
 
@@ -285,6 +367,11 @@ NotePack CODEX는 사용자가 선택한 AI 제공자(OpenAI, Anthropic, Gemini,
 
 이 플러그인은 클라이언트 측 텔레메트리, 즉 사용자 행동을 몰래 수집해 보내는 기능을 포함하지 않습니다.
 
+- Claude Plan·Gemini Plan 요청은 이 컴퓨터에 설치된 Claude Code·Antigravity CLI가 보냅니다. 요청 내용은 각 서비스의 약관과 데이터 정책을 따르고, 조직 계정이면 조직의 보존·감사 정책이 적용될 수 있습니다.
+- NotePack은 Claude·Google 로그인 토큰을 읽거나 저장하지 않습니다. 연결 확인 때는 `claude auth status`의 계정 종류 항목, 과금 관련 환경 변수의 **이름**, 관리 설정 파일·정책이 있는지 여부만 확인하고, 이메일·조직 ID·토큰 값은 기록하지 않습니다.
+- Team/Enterprise 허용 여부와 실행 파일 경로는 그 컴퓨터의 Obsidian 로컬 저장소에만 저장되고 동기화되지 않습니다.
+- OpenAI Plan 토큰은 이전과 같이 플러그인 설정(`data.json`)에 저장됩니다. vault를 동기화하면 이 파일도 함께 동기화됩니다.
+
 
 ---
 
@@ -294,6 +381,13 @@ NotePack CODEX는 사용자가 선택한 AI 제공자(OpenAI, Anthropic, Gemini,
 - [Youngbin201/MikaNote](https://github.com/Youngbin201/MikaNote) — v2.0.0 시각 미학 (정사각 컬러 타일·hover 액션·정렬/휴지통)
 - [Smart Composer](https://github.com/glowingjade/obsidian-smart-composer) — OAuth 구독 인증 패턴
 - [johansan/notebook-navigator](https://github.com/johansan/notebook-navigator) — 호환 대상
+
+### 코드 출처
+
+- [CMDS Achmage](https://github.com/CMDSPACE-DEV/CMDS-Achmage) (MIT) — v4.0.0 Claude·Gemini Plan의 CLI 실행, 과금 안전 판정, Team/Enterprise 허용 흐름
+- Claudian 2.0.41 (MIT) — Claude Code 실행 파일 탐색 (CMDS Achmage 경유)
+
+라이선스 전문은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)에 있습니다.
 
 ---
 

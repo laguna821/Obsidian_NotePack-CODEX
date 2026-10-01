@@ -204,6 +204,7 @@ export async function generatePack(
   sourceCards: WorkbenchCard[],
   nearbyCards: WorkbenchCard[],
   pityCounter: number,
+  signal?: AbortSignal,
 ): Promise<PackSession> {
   if (sourceCards.length === 0) throw new Error("No source cards provided");
   const config = buildAIConfig(runtime.ai);
@@ -319,6 +320,7 @@ Return ONLY a valid JSON object with the "cards" array.`;
     ],
     temperature: 0.7 + risk * 0.03,
     response_format: { type: "json_object" },
+    signal,
   });
 
   // Parse the result
@@ -518,7 +520,7 @@ ${(card.suggested_links || []).filter((l: string) => l.includes("NEW")).map((l: 
 `;
 }
 
-function extractJsonCandidate(content: string): string | null {
+export function extractJsonCandidate(content: string): string | null {
   const fenceMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   if (fenceMatch) return fenceMatch[1].trim();
   const start = content.indexOf("{");

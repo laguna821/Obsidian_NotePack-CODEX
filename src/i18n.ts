@@ -83,7 +83,6 @@ interface TranslationSet {
   whatIsCodex: string;
   whatIsCodexBody: string;
   formattingHint: string;
-  byoOAuthHelp: string;
   openInPopout: string;
   popoutFontSize: string;
   popoutLineHeight: string;
@@ -223,6 +222,36 @@ interface TranslationSet {
   settingsDisconnect: string;
   settingsPlanReconnectNotice: string;
   settingsPlanDesktopOnlyNotice: string;
+  settingsRuntimeStatusUnknown: string;
+  settingsRuntimeStatusChecking: string;
+  settingsRuntimeStatusNotInstalled: string;
+  settingsRuntimeStatusLoginRequired: string;
+  settingsRuntimeStatusBlocked: string;
+  settingsRuntimeStatusReady: string;
+  settingsRuntimeStatusError: string;
+  settingsRuntimeCheck: string;
+  settingsRuntimeOpenLogin: string;
+  settingsRuntimeTerminalFailed: string;
+  settingsRuntimeLoginHint: string;
+  settingsRuntimeInstallGuide: string;
+  settingsRuntimeVersion: string;
+  settingsRuntimeModelsFound: string;
+  settingsRuntimeCustomPath: string;
+  settingsRuntimeCustomPathDesc: string;
+  settingsRuntimeExperimental: string;
+  settingsClaudeOrgBlocked: string;
+  settingsClaudeOrgAllow: string;
+  settingsClaudeOrgAllowed: string;
+  settingsClaudeOrgRevoke: string;
+  settingsClaudeOrgConsentTitle: string;
+  settingsClaudeOrgConsentIntro: string;
+  settingsClaudeOrgConsentItem1: string;
+  settingsClaudeOrgConsentItem2: string;
+  settingsClaudeOrgConsentItem3: string;
+  settingsClaudeOrgConsentItem4: string;
+  settingsClaudeOrgConsentFooter: string;
+  settingsClaudeOrgConsentConfirm: string;
+  migrationPlanTokensRemoved: string;
   settingsProviderConnected: string;
   settingsProviderNotConnected: string;
   settingsCustomModelsSection: string;
@@ -340,7 +369,6 @@ const ko: TranslationSet = {
   whatIsCodex: "CODEX란?",
   whatIsCodexBody: "Codex는 모든 카드를 모아 연결하는 작업장입니다. 메모와 할 일을 입력하고, AI가 자동으로 분류·요약하며, 아이디어 카드를 생성해 사고를 확장합니다.",
   formattingHint: "Ctrl+B 굵게 · Ctrl+I 기울임 · Ctrl+Shift+S 취소선 · Ctrl+Shift+T 할일",
-  byoOAuthHelp: "GCP Console에서 본인 OAuth 클라이언트(Desktop App)를 발급받아 Client ID/Secret을 입력하세요.",
   openInPopout: "별도 창",
   popoutFontSize: "글자 크기",
   popoutLineHeight: "줄 간격",
@@ -367,11 +395,11 @@ const ko: TranslationSet = {
   settingsStatusNotConfigured: "AI가 설정되지 않음",
   settingsStatusPrefix: "상태",
   settingsPlanConnections: "플랜 연결",
-  settingsPlanConnectionsDesktopDesc: "구독 기반 모델은 브라우저 OAuth로 연결합니다. 이 프로바이더들은 API 키가 필요하지 않습니다.",
+  settingsPlanConnectionsDesktopDesc: "OpenAI 플랜은 브라우저 로그인(OAuth)으로, Claude·Gemini 플랜은 이 컴퓨터에 설치한 공식 CLI로 연결합니다. API 키가 필요하지 않습니다.",
   settingsPlanConnectionsMobileDesc: "플랜 연결은 데스크톱에서만 사용할 수 있습니다. 모바일에서는 API 키 프로바이더를 사용하세요.",
   settingsOpenAIPlanDesc: "ChatGPT / Codex 플랜 사용량을 활용합니다.",
-  settingsGeminiPlanDesc: "Gemini Code Assist / Google AI 플랜 사용량을 활용합니다.",
-  settingsAnthropicPlanDesc: "Claude 플랜 사용량을 활용합니다. Anthropic은 코드 입력 단계가 추가로 필요합니다.",
+  settingsGeminiPlanDesc: "이 컴퓨터에 설치된 Google Antigravity CLI(agy)로 실행합니다. 로그인은 Antigravity가 관리하며 NotePack은 토큰을 저장하지 않습니다.",
+  settingsAnthropicPlanDesc: "이 컴퓨터에 설치된 Claude Code로 실행합니다. 로그인은 Claude Code가 관리하며 NotePack은 토큰을 저장하지 않습니다.",
   settingsModelsAvailable: "사용 가능 모델",
   settingsApiKeyProviders: "API 키 프로바이더",
   settingsApiKeyProvidersDesc: "기본 프로바이더는 항상 사용할 수 있습니다. 편집해서 API 키나 엔드포인트를 설정하고, 표준이 아닌 연결이 필요하면 커스텀 프로바이더를 추가하세요.",
@@ -480,6 +508,36 @@ const ko: TranslationSet = {
   settingsDisconnect: "연결 해제",
   settingsPlanReconnectNotice: "OpenAI 플랜 액세스를 복구하려면 재연결하세요.",
   settingsPlanDesktopOnlyNotice: "플랜 연결은 데스크톱에서만 사용할 수 있습니다.",
+  settingsRuntimeStatusUnknown: "확인 전",
+  settingsRuntimeStatusChecking: "확인 중…",
+  settingsRuntimeStatusNotInstalled: "설치되지 않음",
+  settingsRuntimeStatusLoginRequired: "로그인 필요",
+  settingsRuntimeStatusBlocked: "요청 차단",
+  settingsRuntimeStatusReady: "사용 가능",
+  settingsRuntimeStatusError: "확인 실패",
+  settingsRuntimeCheck: "연결 확인",
+  settingsRuntimeOpenLogin: "로그인 터미널 열기",
+  settingsRuntimeTerminalFailed: "터미널을 열지 못했습니다. 터미널을 직접 열고 다음 명령을 실행하세요: {command}",
+  settingsRuntimeLoginHint: "터미널에서 로그인을 마친 뒤 '연결 확인'을 누르세요.",
+  settingsRuntimeInstallGuide: "설치 안내",
+  settingsRuntimeVersion: "버전",
+  settingsRuntimeModelsFound: "발견된 모델",
+  settingsRuntimeCustomPath: "실행 파일 경로 (이 컴퓨터)",
+  settingsRuntimeCustomPathDesc: "자동으로 찾지 못할 때만 입력하세요. 동기화되지 않고 이 컴퓨터에만 저장됩니다.",
+  settingsRuntimeExperimental: "개인 사용 호환 경로이며 Anthropic 공식 연동이 아닙니다.",
+  settingsClaudeOrgBlocked: "Claude Team/Enterprise 계정입니다. 조직 관리자가 적용한 Claude Code 설정이 NotePack 요청에도 적용될 수 있어, 이 컴퓨터에서 허용하기 전에는 요청을 보내지 않습니다.",
+  settingsClaudeOrgAllow: "Team/Enterprise 계정 허용…",
+  settingsClaudeOrgAllowed: "이 컴퓨터에서 Team/Enterprise 계정 사용을 허용했습니다. 조직이 관리하는 Claude Code 설정이 요청에 적용될 수 있습니다.",
+  settingsClaudeOrgRevoke: "허용 해제",
+  settingsClaudeOrgConsentTitle: "Team/Enterprise 계정 허용",
+  settingsClaudeOrgConsentIntro: "이 컴퓨터의 Claude Code가 Team 또는 Enterprise 조직 계정으로 로그인되어 있습니다. 허용하면 NotePack이 이 계정으로 Claude Plan 요청을 보냅니다. 허용하기 전에 확인하세요.",
+  settingsClaudeOrgConsentItem1: "조직 관리자가 적용한 Claude Code 설정(hooks, 환경 변수, 권한, 텔레메트리, MCP 서버 등)이 NotePack 요청에도 적용될 수 있습니다. NotePack은 그 내용을 읽을 수 없습니다.",
+  settingsClaudeOrgConsentItem2: "사용량은 조직 좌석과 조직의 추가 사용량 정책을 따릅니다. 예를 들어 Team Standard 좌석에서는 Fable 모델이 사용량 크레딧으로만 동작합니다.",
+  settingsClaudeOrgConsentItem3: "조직의 데이터 보존·감사 정책이 요청에 담긴 vault 내용에도 적용될 수 있습니다.",
+  settingsClaudeOrgConsentItem4: "Claude Plan 연결은 개인 사용을 위한 실험 기능이며 Anthropic 공식 연동이 아닙니다.",
+  settingsClaudeOrgConsentFooter: "API 키·게이트웨이·클라우드 과금 경로가 감지되면 허용 여부와 관계없이 계속 차단합니다. 이 설정은 동기화되는 vault 설정이 아니라 이 컴퓨터에만 저장되며 언제든 해제할 수 있습니다.",
+  settingsClaudeOrgConsentConfirm: "이 컴퓨터에서 허용",
+  migrationPlanTokensRemoved: "NotePack CODEX 4.0: Claude Plan과 Gemini Plan은 이제 이 컴퓨터에 설치된 Claude Code와 Antigravity CLI로 실행됩니다. 저장되어 있던 두 플랜의 로그인 토큰을 삭제했습니다. 설정 → 플랜 연결에서 '연결 확인'을 눌러 주세요.",
   settingsProviderConnected: "연결됨",
   settingsProviderNotConnected: "연결 안 됨",
   settingsCustomModelsSection: "이 프로바이더의 커스텀 모델",
@@ -597,7 +655,6 @@ const en: TranslationSet = {
   whatIsCodex: "What is CODEX?",
   whatIsCodexBody: "Codex is a workbench that gathers and connects every card you write. Capture notes and todos; the AI categorizes and summarizes them, and generates idea cards to grow your thinking.",
   formattingHint: "Ctrl+B bold · Ctrl+I italic · Ctrl+Shift+S strike · Ctrl+Shift+T todo",
-  byoOAuthHelp: "Issue your own OAuth client (Desktop App) in GCP Console and paste its Client ID/Secret here.",
   openInPopout: "Open in window",
   popoutFontSize: "Font size",
   popoutLineHeight: "Line height",
@@ -624,11 +681,11 @@ const en: TranslationSet = {
   settingsStatusNotConfigured: "AI not configured",
   settingsStatusPrefix: "Status",
   settingsPlanConnections: "Plan Connections",
-  settingsPlanConnectionsDesktopDesc: "Use browser-based OAuth for subscription-backed models. API keys are not required for these providers.",
+  settingsPlanConnectionsDesktopDesc: "OpenAI Plan connects with a browser login (OAuth); Claude and Gemini Plan run the official CLIs installed on this computer. No API keys are required.",
   settingsPlanConnectionsMobileDesc: "Plan connections are only available on desktop. On mobile, use API key providers instead.",
   settingsOpenAIPlanDesc: "Uses your ChatGPT / Codex plan usage.",
-  settingsGeminiPlanDesc: "Uses your Gemini Code Assist / Google AI plan usage.",
-  settingsAnthropicPlanDesc: "Uses your Claude plan usage. Anthropic still requires a manual code step.",
+  settingsGeminiPlanDesc: "Runs the Google Antigravity CLI (agy) installed on this computer. Antigravity manages the login; NotePack never stores tokens.",
+  settingsAnthropicPlanDesc: "Runs Claude Code installed on this computer. Claude Code manages the login; NotePack never stores tokens.",
   settingsModelsAvailable: "Models available",
   settingsApiKeyProviders: "API Key Providers",
   settingsApiKeyProvidersDesc: "Built-in providers stay available by default. Edit them to set API keys or endpoints, and add custom providers when you need a non-standard connection.",
@@ -737,6 +794,36 @@ const en: TranslationSet = {
   settingsDisconnect: "Disconnect",
   settingsPlanReconnectNotice: "Reconnect OpenAI Plan to restore access.",
   settingsPlanDesktopOnlyNotice: "Plan connections are only available on desktop.",
+  settingsRuntimeStatusUnknown: "Not checked",
+  settingsRuntimeStatusChecking: "Checking…",
+  settingsRuntimeStatusNotInstalled: "Not installed",
+  settingsRuntimeStatusLoginRequired: "Sign-in required",
+  settingsRuntimeStatusBlocked: "Requests blocked",
+  settingsRuntimeStatusReady: "Ready",
+  settingsRuntimeStatusError: "Check failed",
+  settingsRuntimeCheck: "Check connection",
+  settingsRuntimeOpenLogin: "Open sign-in terminal",
+  settingsRuntimeTerminalFailed: "Could not open a terminal. Open one yourself and run: {command}",
+  settingsRuntimeLoginHint: "Finish signing in in the terminal, then press Check connection.",
+  settingsRuntimeInstallGuide: "Install guide",
+  settingsRuntimeVersion: "Version",
+  settingsRuntimeModelsFound: "Models found",
+  settingsRuntimeCustomPath: "Executable path (this computer)",
+  settingsRuntimeCustomPathDesc: "Only if it is not found automatically. Saved on this computer only, never synced.",
+  settingsRuntimeExperimental: "Personal-use compatibility path, not an official Anthropic integration.",
+  settingsClaudeOrgBlocked: "This is a Claude Team/Enterprise account. Claude Code settings applied by your organization can also apply to NotePack's requests, so NotePack waits until you allow organization accounts on this computer.",
+  settingsClaudeOrgAllow: "Allow Team/Enterprise account…",
+  settingsClaudeOrgAllowed: "Team/Enterprise accounts are allowed on this computer. Organization-managed Claude Code settings may apply to requests.",
+  settingsClaudeOrgRevoke: "Revoke",
+  settingsClaudeOrgConsentTitle: "Allow a Team/Enterprise account",
+  settingsClaudeOrgConsentIntro: "Claude Code on this computer is signed in with a Team or Enterprise organization account. If you allow it, NotePack sends Claude Plan requests through this account. Before you allow it:",
+  settingsClaudeOrgConsentItem1: "Claude Code settings your organization applies (hooks, environment variables, permissions, telemetry, MCP servers) can also apply to NotePack's requests. NotePack cannot read them.",
+  settingsClaudeOrgConsentItem2: "Usage follows your organization seat and its extra-usage policy. For example, on a Team Standard seat Fable models run on usage credits only.",
+  settingsClaudeOrgConsentItem3: "Your organization's retention and audit policies can apply to the vault content in requests.",
+  settingsClaudeOrgConsentItem4: "Claude Plan is an experimental personal-use path, not an official Anthropic integration.",
+  settingsClaudeOrgConsentFooter: "API-key, gateway, and cloud-billing routes stay blocked either way. This setting is stored on this computer only, never in synced vault settings, and you can revoke it at any time.",
+  settingsClaudeOrgConsentConfirm: "Allow on this computer",
+  migrationPlanTokensRemoved: "NotePack CODEX 4.0: Claude Plan and Gemini Plan now run Claude Code and the Antigravity CLI installed on this computer. The sign-in tokens stored for those two plans were deleted. Open Settings → Plan connections and press Check connection.",
   settingsProviderConnected: "Connected",
   settingsProviderNotConnected: "Not connected",
   settingsCustomModelsSection: "Custom models for this provider",

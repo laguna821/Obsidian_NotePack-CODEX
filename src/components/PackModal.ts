@@ -25,6 +25,7 @@ export class PackModal extends Modal {
   private isGenerating = false;
   private stageTextEl: HTMLElement | null = null;
   private rerollButtonEl: HTMLButtonElement | null = null;
+  private generationController: AbortController | null = null;
 
   constructor(
     app: App,
@@ -127,6 +128,8 @@ export class PackModal extends Modal {
     this.setStageText(t("packStageSeed"));
 
     const seedStageStartedAt = Date.now();
+    const controller = new AbortController();
+    this.generationController = controller;
 
     try {
       const sourceIds = new Set(this.sourceCards.map((c) => c.id));
@@ -138,6 +141,7 @@ export class PackModal extends Modal {
       if (elapsedInSeed < STAGE_SEED_MIN_MS) {
         await new Promise((resolve) => setTimeout(resolve, STAGE_SEED_MIN_MS - elapsedInSeed));
       }
+      if (controller.signal.aborted) return;
       this.setStageText(t("packStageGenerating"));
 
       this.session = await generatePack(
@@ -145,7 +149,9 @@ export class PackModal extends Modal {
         this.sourceCards,
         nearbyCards,
         this.store.pityCounter,
+        controller.signal,
       );
+      if (controller.signal.aborted) return;
 
       this.setStageText(t("packStageFinishing"));
 
@@ -161,6 +167,8 @@ export class PackModal extends Modal {
       this.stageTextEl = null;
       this.renderCards();
     } catch (error) {
+      // Closing the modal cancels the request; there is nothing left to render.
+      if (controller.signal.aborted || !this.contentInnerEl) return;
       this.contentInnerEl.empty();
       this.stageTextEl = null;
       const errorEl = this.contentInnerEl.createDiv({ cls: "np-pack-modal-error" });
@@ -177,6 +185,7 @@ export class PackModal extends Modal {
         });
       }
     } finally {
+      if (this.generationController === controller) this.generationController = null;
       this.isGenerating = false;
       this.rerollButtonEl?.removeAttribute("disabled");
       this.rerollButtonEl?.removeClass("np-pack-modal-reroll--busy");
@@ -274,6 +283,8 @@ export class PackModal extends Modal {
   }
 
   onClose(): void {
+    this.generationController?.abort();
+    this.generationController = null;
     this.cardElements.forEach((cardEl) => cardEl.destroy());
     this.cardElements = [];
     this.modalEl.removeClass("np-pack-modal-frame");

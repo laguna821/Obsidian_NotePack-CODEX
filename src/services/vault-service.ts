@@ -3,7 +3,11 @@ import { getPrimaryAnnotation } from "../data/annotations";
 import type { PackCard, WorkbenchCard } from "../types";
 
 export class VaultService {
-  constructor(private app: App) {}
+  private app: App;
+
+  constructor(app: App) {
+    this.app = app;
+  }
 
   async promoteCard(card: WorkbenchCard, folder: string, author?: string): Promise<string> {
     const folderPath = normalizePath(folder);

@@ -30,22 +30,23 @@ import {
   type DifficultyPresetEntry,
 } from "./ai/difficulty-presets";
 import {
-  buildAnthropicPlanAuthorizeUrl,
-  buildGeminiPlanAuthorizeUrl,
-  resolveGeminiCredentials,
-  setupCodeAssistUser,
+  OPENAI_REDIRECT_URIS,
   buildOpenAIPlanAuthorizeUrl,
+  closeOAuthCallbackServer,
   createOAuthState,
   createPkcePair,
-  exchangeAnthropicPlanCode,
-  exchangeGeminiPlanCode,
   exchangeOpenAIPlanCode,
   extractOpenAIAccountId,
+  isOAuthLoginCancelled,
+  listenForOAuthCallback,
   parseOAuthParam,
-  waitForOAuthCallback,
 } from "./ai/oauth";
+import { getNativeRuntime } from "./ai/native/runtime";
+import type { NativeRuntimeProvider, NativeRuntimeSnapshot } from "./ai/native/types";
 import type {
   AIChatModel,
+  AIClaudeEffort,
+  AIReasoningEffort,
   AIOAuthState,
   AIProviderAdditionalSettings,
   AIProviderRecord,
@@ -461,9 +462,10 @@ class ChatModelModal extends Modal {
   private supportsJsonObject: boolean;
   private supportsAnnotations: boolean;
   private reasoningEnabled: boolean;
-  private reasoningEffort: "low" | "medium" | "high";
+  private reasoningEffort: AIReasoningEffort;
   private thinkingEnabled: boolean;
   private thinkingBudget: string;
+  private thinkingEffort: AIClaudeEffort | "";
 
   constructor(
     app: App,
@@ -491,6 +493,7 @@ class ChatModelModal extends Modal {
     this.reasoningEffort = model?.reasoning?.reasoning_effort ?? "medium";
     this.thinkingEnabled = Boolean(model?.thinking?.enabled);
     this.thinkingBudget = model?.thinking?.budget_tokens ? String(model.thinking.budget_tokens) : "";
+    this.thinkingEffort = model?.thinking?.effort ?? "";
   }
 
   onOpen(): void {
@@ -608,10 +611,18 @@ class ChatModelModal extends Modal {
         .setName("Reasoning effort")
         .setDesc("Relative effort hint for reasoning-capable models.")
         .addDropdown((dropdown) => {
-          dropdown.addOptions({ low: "Low", medium: "Medium", high: "High" });
+          dropdown.addOptions({
+            none: "None",
+            minimal: "Minimal",
+            low: "Low",
+            medium: "Medium",
+            high: "High",
+            xhigh: "Extra high",
+            max: "Max",
+          });
           dropdown.setValue(this.reasoningEffort);
           dropdown.onChange((value) => {
-            this.reasoningEffort = value as "low" | "medium" | "high";
+            this.reasoningEffort = value as AIReasoningEffort;
           });
         });
     }
@@ -628,10 +639,20 @@ class ChatModelModal extends Modal {
 
     if (this.thinkingEnabled) {
       new Setting(this.contentEl)
+        .setName("Thinking effort")
+        .setDesc("Claude 4.6+ and Claude Plan models: adaptive thinking effort. Leave empty for the default.")
+        .addDropdown((dropdown) => {
+          dropdown.addOptions({ "": "Default", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" });
+          dropdown.setValue(this.thinkingEffort);
+          dropdown.onChange((value) => {
+            this.thinkingEffort = value as AIClaudeEffort | "";
+          });
+        });
+      new Setting(this.contentEl)
         .setName("Thinking budget tokens")
-        .setDesc("Optional token budget for thinking mode.")
+        .setDesc("Only for older Claude models such as Haiku 4.5. Ignored by Claude 4.6+.")
         .addText((text) => {
-          text.setPlaceholder("8192").setValue(this.thinkingBudget).onChange((value) => {
+          text.setPlaceholder("4096").setValue(this.thinkingBudget).onChange((value) => {
             this.thinkingBudget = value;
           });
         });
@@ -676,7 +697,11 @@ class ChatModelModal extends Modal {
         supportsAnnotations: this.supportsAnnotations,
         reasoning: this.reasoningEnabled ? { enabled: true, reasoning_effort: this.reasoningEffort } : undefined,
         thinking: this.thinkingEnabled
-          ? { enabled: true, budget_tokens: parseOptionalNumber(this.thinkingBudget) }
+          ? {
+              enabled: true,
+              budget_tokens: parseOptionalNumber(this.thinkingBudget),
+              effort: this.thinkingEffort || undefined,
+            }
           : undefined,
       });
       this.close();
@@ -713,11 +738,13 @@ abstract class PlanConnectionModal extends Modal {
   }
 }
 
+type PkcePair = Awaited<ReturnType<typeof createPkcePair>>;
+
 class OpenAIPlanConnectionModal extends PlanConnectionModal {
   private redirectValue = "";
-  private pkceVerifier = "";
+  private pkce?: PkcePair;
   private state = "";
-  private authorizeUrl = "";
+  private redirectUri: string = OPENAI_REDIRECT_URIS[0];
 
   onOpen(): void {
     this.titleEl.setText("Connect OpenAI Plan");
@@ -744,7 +771,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
       .setName("Redirect URL (fallback)")
       .setDesc("Use this only if automatic connect fails. Paste the full redirect URL from your browser.")
       .addTextArea((text) => {
-        text.setPlaceholder("http://localhost:1455/auth/callback?code=...").onChange((value) => {
+        text.setPlaceholder(`${OPENAI_REDIRECT_URIS[0]}?code=...`).onChange((value) => {
           this.redirectValue = value;
           this.setError("");
         });
@@ -758,36 +785,49 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
     this.createFooter();
   }
 
-  private async ensureFlow(): Promise<void> {
-    if (this.authorizeUrl && this.pkceVerifier && this.state) return;
-    const pkce = await createPkcePair();
-    const state = createOAuthState();
-    this.pkceVerifier = pkce.verifier;
-    this.state = state;
-    this.authorizeUrl = buildOpenAIPlanAuthorizeUrl({ pkce, state });
+  onClose(): void {
+    void closeOAuthCallbackServer();
+    this.contentEl.empty();
+  }
+
+  private async ensureFlow(): Promise<PkcePair> {
+    if (!this.pkce || !this.state) {
+      this.pkce = await createPkcePair();
+      this.state = createOAuthState();
+    }
+    return this.pkce;
   }
 
   private async startAutomaticConnect(): Promise<void> {
     this.setError("");
     this.setStatus("Preparing login...");
 
+    let pending: Promise<string> | undefined;
     try {
-      await this.ensureFlow();
-      window.open(this.authorizeUrl, "_blank");
+      const pkce = await this.ensureFlow();
+      try {
+        const listener = await listenForOAuthCallback({ state: this.state, redirectUris: OPENAI_REDIRECT_URIS });
+        this.redirectUri = listener.redirectUri;
+        pending = listener.code;
+      } catch (listenError) {
+        // Without a local port the browser still shows the redirect URL,
+        // which the user can paste below.
+        console.error(listenError);
+        this.redirectUri = OPENAI_REDIRECT_URIS[0];
+      }
+      window.open(buildOpenAIPlanAuthorizeUrl({ pkce, state: this.state, redirectUri: this.redirectUri }), "_blank");
+      if (!pending) {
+        this.setStatus("");
+        this.setError("Automatic connect is unavailable. After logging in, paste the full redirect URL below.");
+        return;
+      }
       this.setStatus("Waiting for OpenAI authorization...");
-
-      const code = await waitForOAuthCallback({
-        state: this.state,
-        redirectUri: "http://localhost:1455/auth/callback",
-      });
-
-      const token = await exchangeOpenAIPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-      });
-
+      const code = await pending;
+      const token = await exchangeOpenAIPlanCode({ code, pkceVerifier: pkce.verifier, redirectUri: this.redirectUri });
       await this.completeConnection(token);
     } catch (error) {
+      // A newer login attempt or closing the dialog cancelled this one.
+      if (isOAuthLoginCancelled(error)) return;
       this.setStatus("");
       this.setError("Automatic connect failed. Paste the full redirect URL below and try again.");
       console.error(error);
@@ -796,7 +836,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
 
   private async finishWithRedirectUrl(): Promise<void> {
     this.setError("");
-    await this.ensureFlow();
+    const pkce = await this.ensureFlow();
 
     const code = parseOAuthParam(this.redirectValue, "code");
     const state = parseOAuthParam(this.redirectValue, "state");
@@ -810,11 +850,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
     }
 
     try {
-      const token = await exchangeOpenAIPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-      });
-
+      const token = await exchangeOpenAIPlanCode({ code, pkceVerifier: pkce.verifier, redirectUri: this.redirectUri });
       await this.completeConnection(token);
     } catch (error) {
       this.setError("Manual connect failed. Start login again and paste the newest redirect URL.");
@@ -837,317 +873,66 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
   }
 }
 
-class GeminiPlanConnectionModal extends PlanConnectionModal {
-  private redirectValue = "";
-  private pkceVerifier = "";
-  private state = "";
-  private authorizeUrl = "";
+/** Explicit, device-local consent before Claude Plan uses an organization login. */
+class ClaudeOrganizationConsentModal extends Modal {
+  private readonly onConfirm: () => void;
+
+  constructor(app: App, onConfirm: () => void) {
+    super(app);
+    this.onConfirm = onConfirm;
+  }
 
   onOpen(): void {
-    this.titleEl.setText("Connect Gemini Plan");
+    this.titleEl.setText(t("settingsClaudeOrgConsentTitle"));
     this.contentEl.empty();
+    this.contentEl.createEl("p", { text: t("settingsClaudeOrgConsentIntro") });
+    const list = this.contentEl.createEl("ul");
+    for (const item of [
+      t("settingsClaudeOrgConsentItem1"),
+      t("settingsClaudeOrgConsentItem2"),
+      t("settingsClaudeOrgConsentItem3"),
+      t("settingsClaudeOrgConsentItem4"),
+    ]) {
+      list.createEl("li", { text: item });
+    }
+    this.contentEl.createEl("p", { text: t("settingsClaudeOrgConsentFooter"), cls: "notepack-settings-note" });
 
-    this.contentEl.createEl("p", {
-      text: "Log in with Google in your browser. NotePack will try to connect automatically when the callback arrives.",
-    });
-
-    this.statusEl = this.contentEl.createDiv({ cls: "notepack-settings-note" });
-    this.errorEl = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    this.errorEl.style.display = "none";
-
-    new Setting(this.contentEl)
-      .setName("Google login")
-      .setDesc("Browser login opens Gemini/Google authorization.")
-      .addButton((button) => {
-        button.setButtonText("Login to Google").setCta().onClick(() => {
-          void this.startAutomaticConnect();
-        });
-      });
-
-    new Setting(this.contentEl)
-      .setName("Redirect URL (fallback)")
-      .setDesc("Use this only if automatic connect fails. Paste the full redirect URL from your browser.")
-      .addTextArea((text) => {
-        text.setPlaceholder("http://localhost:8085/oauth2callback?code=...").onChange((value) => {
-          this.redirectValue = value;
-          this.setError("");
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText("Connect with URL").onClick(() => {
-          void this.finishWithRedirectUrl();
-        });
-      });
-
-    this.createFooter();
-  }
-
-  private getCredentials(): { clientId: string; clientSecret: string } {
-    const extra = this.provider.additionalSettings ?? {};
-    return resolveGeminiCredentials({
-      clientId: String(extra.geminiByoClientId ?? ""),
-      clientSecret: String(extra.geminiByoClientSecret ?? ""),
+    const footer = this.contentEl.createDiv({ cls: "notepack-settings-modal-actions" });
+    footer.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    const confirm = footer.createEl("button", { text: t("settingsClaudeOrgConsentConfirm") });
+    confirm.addClass("mod-warning");
+    confirm.addEventListener("click", () => {
+      this.close();
+      this.onConfirm();
     });
   }
 
-  private async ensureFlow(): Promise<boolean> {
-    const creds = this.getCredentials();
-    if (this.authorizeUrl && this.pkceVerifier && this.state) return true;
-    const pkce = await createPkcePair();
-    const state = createOAuthState();
-    this.pkceVerifier = pkce.verifier;
-    this.state = state;
-    this.authorizeUrl = buildGeminiPlanAuthorizeUrl({ pkce, state, clientId: creds.clientId });
-    return true;
-  }
-
-  private async startAutomaticConnect(): Promise<void> {
-    this.setError("");
-    this.setStatus("Preparing login...");
-
-    try {
-      const ready = await this.ensureFlow();
-      if (!ready) {
-        this.setStatus("");
-        return;
-      }
-      const creds = this.getCredentials();
-
-      window.open(this.authorizeUrl, "_blank");
-      this.setStatus("Waiting for Google authorization...");
-
-      const code = await waitForOAuthCallback({
-        state: this.state,
-        redirectUri: "http://localhost:8085/oauth2callback",
-      });
-
-      const token = await exchangeGeminiPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-        clientId: creds.clientId,
-        clientSecret: creds.clientSecret,
-      });
-
-      this.setStatus("Setting up Gemini Code Assist...");
-      let managedProjectId: string | undefined;
-      let setupErrorMessage: string | undefined;
-      try {
-        const setup = await setupCodeAssistUser(token.access_token);
-        managedProjectId = setup.projectId;
-      } catch (setupError) {
-        setupErrorMessage =
-          setupError instanceof Error ? setupError.message : String(setupError);
-        console.error("Code Assist onboarding failed", setupError);
-      }
-
-      await this.onSubmit({
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
-        expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
-        email: token.email,
-        managedProjectId,
-      });
-
-      if (setupErrorMessage) {
-        // OAuth token is valid and stored — but Code Assist project onboarding
-        // failed, so any :generateContent call will 404 until this clears. Tell
-        // the user up front instead of letting them hit the opaque 404 later.
-        new Notice(
-          `Gemini Plan 로그인은 성공했지만 Code Assist 프로젝트 설정에 실패했습니다: ${setupErrorMessage}`,
-          12000,
-        );
-        this.setError(`Code Assist setup failed: ${setupErrorMessage}`);
-      } else {
-        new Notice("Gemini Plan connected");
-        this.close();
-      }
-    } catch (error) {
-      this.setStatus("");
-      this.setError("Automatic connect failed. Paste the full redirect URL below and try again.");
-      console.error(error);
-    }
-  }
-
-  private async finishWithRedirectUrl(): Promise<void> {
-    this.setError("");
-    const ready = await this.ensureFlow();
-    if (!ready) return;
-    const creds = this.getCredentials();
-
-    const code = parseOAuthParam(this.redirectValue, "code");
-    const state = parseOAuthParam(this.redirectValue, "state");
-    if (!code || !state) {
-      this.setError("Paste the full redirect URL from your browser address bar.");
-      return;
-    }
-    if (state !== this.state) {
-      this.setError("OAuth state mismatch. Start login again and use the newest redirect URL.");
-      return;
-    }
-
-    try {
-      const token = await exchangeGeminiPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-        clientId: creds.clientId,
-        clientSecret: creds.clientSecret,
-      });
-
-      let managedProjectId: string | undefined;
-      let setupErrorMessage: string | undefined;
-      try {
-        const setup = await setupCodeAssistUser(token.access_token);
-        managedProjectId = setup.projectId;
-      } catch (setupError) {
-        setupErrorMessage =
-          setupError instanceof Error ? setupError.message : String(setupError);
-        console.error("Code Assist onboarding failed", setupError);
-      }
-
-      await this.onSubmit({
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
-        expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
-        email: token.email,
-        managedProjectId,
-      });
-
-      if (setupErrorMessage) {
-        // OAuth token is valid and stored — but Code Assist project onboarding
-        // failed, so any :generateContent call will 404 until this clears. Tell
-        // the user up front instead of letting them hit the opaque 404 later.
-        new Notice(
-          `Gemini Plan 로그인은 성공했지만 Code Assist 프로젝트 설정에 실패했습니다: ${setupErrorMessage}`,
-          12000,
-        );
-        this.setError(`Code Assist setup failed: ${setupErrorMessage}`);
-      } else {
-        new Notice("Gemini Plan connected");
-        this.close();
-      }
-    } catch (error) {
-      this.setError("Manual connect failed. Start login again and paste the newest redirect URL.");
-      console.error(error);
-    }
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
 
-class AnthropicPlanConnectionModal extends PlanConnectionModal {
-  private code = "";
-  private pkceVerifier = "";
-  private state = "";
-  private authorizeUrl = "";
-  private riskAcknowledged = false;
+const RUNTIME_INSTALL_GUIDES: Record<NativeRuntimeProvider, string> = {
+  claude: "https://code.claude.com/docs/en/installation",
+  gemini: "https://antigravity.google/docs/cli/install",
+};
 
-  onOpen(): void {
-    this.titleEl.setText("Connect Claude Plan");
-    this.contentEl.empty();
-
-    this.contentEl.createEl("p", {
-      text: "Anthropic still requires a browser login and code exchange. This is no longer a token-paste modal, but it still needs the authorization code from the redirected browser URL.",
-    });
-
-    const warning = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    warning.createEl("strong", { text: "Warning" });
-    warning.createEl("p", {
-      text: getProviderDefinition("anthropic-plan").warning || "",
-    });
-
-    this.statusEl = this.contentEl.createDiv({ cls: "notepack-settings-note" });
-    this.errorEl = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    this.errorEl.style.display = "none";
-
-    new Setting(this.contentEl)
-      .setName("I understand the risk")
-      .setDesc("You must acknowledge this warning before connecting Claude Plan.")
-      .addToggle((toggle) => {
-        toggle.setValue(this.riskAcknowledged).onChange((value) => {
-          this.riskAcknowledged = value;
-        });
-      });
-
-    new Setting(this.contentEl)
-      .setName("Claude login")
-      .setDesc("Open the Claude browser login first.")
-      .addButton((button) => {
-        button.setButtonText("Login to Claude").setCta().onClick(() => {
-          void this.openClaudeLogin();
-        });
-      });
-
-    new Setting(this.contentEl)
-      .setName("Authorization code")
-      .setDesc("Paste the code from the redirected Claude URL.")
-      .addText((text) => {
-        text.setPlaceholder("Paste authorization code").onChange((value) => {
-          this.code = value;
-          this.setError("");
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText("Connect").setCta().onClick(() => {
-          void this.finishConnect();
-        });
-      });
-
-    this.createFooter();
-  }
-
-  private async ensureFlow(): Promise<void> {
-    if (this.authorizeUrl && this.pkceVerifier && this.state) return;
-    const pkce = await createPkcePair();
-    const state = createOAuthState();
-    this.pkceVerifier = pkce.verifier;
-    this.state = state;
-    this.authorizeUrl = buildAnthropicPlanAuthorizeUrl({ pkce, state });
-  }
-
-  private async openClaudeLogin(): Promise<void> {
-    this.setError("");
-    this.setStatus("Preparing Claude login...");
-    try {
-      await this.ensureFlow();
-      window.open(this.authorizeUrl, "_blank");
-      this.setStatus("Complete the Claude login, then paste the returned authorization code.");
-    } catch (error) {
-      this.setStatus("");
-      this.setError("Failed to initialize the Claude login flow.");
-      console.error(error);
-    }
-  }
-
-  private async finishConnect(): Promise<void> {
-    this.setError("");
-    if (!this.riskAcknowledged) {
-      this.setError("Acknowledge the warning before connecting Claude Plan.");
-      return;
-    }
-    if (!this.code.trim()) {
-      this.setError("Paste the authorization code from the redirected Claude URL.");
-      return;
-    }
-
-    await this.ensureFlow();
-
-    try {
-      const token = await exchangeAnthropicPlanCode({
-        code: this.code.trim(),
-        state: this.state,
-        pkceVerifier: this.pkceVerifier,
-      });
-
-      await this.onSubmit({
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
-        expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
-      });
-
-      new Notice("Claude Plan connected");
-      this.close();
-    } catch (error) {
-      this.setError("Claude OAuth failed. Double-check the code and try again.");
-      console.error(error);
-    }
+function runtimeStatusLabel(snapshot: NativeRuntimeSnapshot): string {
+  switch (snapshot.status) {
+    case "checking":
+      return t("settingsRuntimeStatusChecking");
+    case "not-installed":
+      return t("settingsRuntimeStatusNotInstalled");
+    case "login-required":
+      return t("settingsRuntimeStatusLoginRequired");
+    case "blocked":
+      return t("settingsRuntimeStatusBlocked");
+    case "ready":
+      return t("settingsRuntimeStatusReady");
+    case "error":
+      return t("settingsRuntimeStatusError");
+    default:
+      return t("settingsRuntimeStatusUnknown");
   }
 }
 
@@ -1157,6 +942,8 @@ export class NotePackSettingTab extends PluginSettingTab {
   private readonly plugin: NotePackPlugin;
   private activeTab: SettingsTabId = "setup";
   private activePersonaTab = 0;
+  private runtimeSubscriptions: Array<() => void> = [];
+  private visible = false;
 
   constructor(app: App, plugin: NotePackPlugin) {
     super(app, plugin);
@@ -1166,6 +953,8 @@ export class NotePackSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     const settings = this.plugin.settingsStore.settings;
+    this.clearRuntimeSubscriptions();
+    this.visible = true;
 
     containerEl.empty();
     containerEl.addClass("notepack-settings");
@@ -1188,6 +977,17 @@ export class NotePackSettingTab extends PluginSettingTab {
       this.renderUiLanguageSection(panel, settings);
       this.renderMaintenanceSection(panel, settings);
     }
+  }
+
+  hide(): void {
+    this.visible = false;
+    this.clearRuntimeSubscriptions();
+    super.hide();
+  }
+
+  private clearRuntimeSubscriptions(): void {
+    this.runtimeSubscriptions.forEach((unsubscribe) => unsubscribe());
+    this.runtimeSubscriptions = [];
   }
 
   private renderTabBar(containerEl: HTMLElement): void {
@@ -1242,7 +1042,8 @@ export class NotePackSettingTab extends PluginSettingTab {
   private saveSettings(nextSettings: AISettings): void {
     setLanguage(nextSettings.uiLanguage);
     this.plugin.settingsStore.updateSettings(nextSettings);
-    this.display();
+    // A background check can finish after the tab closed.
+    if (this.visible) this.display();
   }
 
   private persistProviderWithModels(provider: AIProviderRecord, stagedModels: AIChatModel[]): void {
@@ -1314,14 +1115,14 @@ export class NotePackSettingTab extends PluginSettingTab {
 
     const grid = section.createDiv({ cls: "notepack-settings-grid" });
     this.renderPlanCard(grid, settings, "openai-plan", "OpenAI", t("settingsOpenAIPlanDesc"));
-    this.renderPlanCard(grid, settings, "gemini-plan", "Gemini", t("settingsGeminiPlanDesc"));
-    this.renderPlanCard(grid, settings, "anthropic-plan", "Claude", t("settingsAnthropicPlanDesc"));
+    this.renderNativeRuntimeCard(grid, settings, "claude", "Claude", t("settingsAnthropicPlanDesc"));
+    this.renderNativeRuntimeCard(grid, settings, "gemini", "Gemini", t("settingsGeminiPlanDesc"));
   }
 
   private renderPlanCard(
     containerEl: HTMLElement,
     settings: AISettings,
-    type: Extract<AIProviderType, "openai-plan" | "gemini-plan" | "anthropic-plan">,
+    type: Extract<AIProviderType, "openai-plan">,
     title: string,
     description: string,
   ): void {
@@ -1350,14 +1151,6 @@ export class NotePackSettingTab extends PluginSettingTab {
       reconnectEl.addClass("notepack-settings-warning");
     }
 
-    if (type === "anthropic-plan") {
-      const warning = getProviderDefinition(type).warning;
-      if (warning) {
-        const warningEl = card.createEl("p", { text: warning });
-        warningEl.addClass("notepack-settings-warning");
-      }
-    }
-
     const actions = card.createDiv({ cls: "notepack-settings-card-actions" });
     const connectButton = actions.createEl("button", { text: connected || needsReconnect ? t("settingsReconnect") : t("settingsConnect") });
     connectButton.addClass("mod-cta");
@@ -1377,17 +1170,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         );
       };
 
-      switch (type) {
-        case "openai-plan":
-          new OpenAIPlanConnectionModal(this.app, provider, saveOauth).open();
-          break;
-        case "gemini-plan":
-          new GeminiPlanConnectionModal(this.app, provider, saveOauth).open();
-          break;
-        case "anthropic-plan":
-          new AnthropicPlanConnectionModal(this.app, provider, saveOauth).open();
-          break;
-      }
+      new OpenAIPlanConnectionModal(this.app, provider, saveOauth).open();
     });
 
     const disconnectButton = actions.createEl("button", { text: t("settingsDisconnect") });
@@ -1400,6 +1183,160 @@ export class NotePackSettingTab extends PluginSettingTab {
         }),
       );
     });
+  }
+
+  /**
+   * Claude Plan and Gemini Plan run the official CLIs installed on this
+   * computer. The card shows the device's runtime state; nothing about it is
+   * stored in the synced vault settings.
+   */
+  private renderNativeRuntimeCard(
+    containerEl: HTMLElement,
+    settings: AISettings,
+    provider: NativeRuntimeProvider,
+    title: string,
+    description: string,
+  ): void {
+    const card = containerEl.createDiv({ cls: "notepack-settings-card" });
+    const providerId = provider === "claude" ? "anthropic-plan" : "gemini-plan";
+    const configuredModels = getModelsForProvider(settings, providerId).length;
+
+    if (!Platform.isDesktop) {
+      card.createEl("h4", { text: title });
+      card.createEl("p", { text: description });
+      card.createEl("p", { text: t("settingsPlanDesktopOnlyNotice"), cls: "notepack-settings-warning" });
+      return;
+    }
+
+    const runtime = getNativeRuntime();
+    // Kept outside paint: status updates repaint the card while the user types.
+    let customPath = runtime.getCustomPath(provider);
+    const paint = () => {
+      const snapshot = runtime.getSnapshot(provider);
+      card.empty();
+      card.createEl("h4", { text: title });
+      card.createEl("p", { text: description });
+      if (provider === "claude") {
+        card.createEl("p", { text: t("settingsRuntimeExperimental"), cls: "notepack-settings-note" });
+      }
+
+      const status = [runtimeStatusLabel(snapshot)];
+      if (snapshot.version) status.push(`${t("settingsRuntimeVersion")} ${snapshot.version}`);
+      card.createEl("p", { text: status.join(" · "), cls: "notepack-settings-card-status" });
+      card.createEl("p", { text: `${t("settingsModelsAvailable")}: ${configuredModels}` });
+      if (provider === "gemini" && snapshot.models.length > 0) {
+        card.createEl("p", { text: `${t("settingsRuntimeModelsFound")}: ${snapshot.models.map((model) => model.id).join(", ")}` });
+      }
+
+      const organizationOptIn = provider === "claude" && snapshot.decision?.code === "organization-opt-in-required";
+      if (organizationOptIn) {
+        card.createEl("p", { text: t("settingsClaudeOrgBlocked"), cls: "notepack-settings-warning" });
+      } else if (snapshot.error && snapshot.status !== "checking") {
+        card.createEl("p", { text: snapshot.error, cls: "notepack-settings-warning" });
+      }
+      if (snapshot.status === "login-required") {
+        card.createEl("p", { text: t("settingsRuntimeLoginHint"), cls: "notepack-settings-note" });
+      }
+      if (provider === "claude" && runtime.allowsClaudeOrganizationPlans()) {
+        card.createEl("p", { text: t("settingsClaudeOrgAllowed"), cls: "notepack-settings-note" });
+      }
+
+      const actions = card.createDiv({ cls: "notepack-settings-card-actions" });
+      const check = actions.createEl("button", { text: t("settingsRuntimeCheck") });
+      if (snapshot.status !== "ready") check.addClass("mod-cta");
+      check.disabled = snapshot.status === "checking";
+      check.addEventListener("click", () => {
+        void this.checkNativeRuntime(provider);
+      });
+
+      if (snapshot.status === "not-installed") {
+        actions.createEl("button", { text: t("settingsRuntimeInstallGuide") }).addEventListener("click", () => {
+          window.open(RUNTIME_INSTALL_GUIDES[provider], "_blank");
+        });
+      } else if (snapshot.executablePath) {
+        actions.createEl("button", { text: t("settingsRuntimeOpenLogin") }).addEventListener("click", () => {
+          try {
+            runtime.openLoginTerminal(provider, (command) => {
+              new Notice(t("settingsRuntimeTerminalFailed").replace("{command}", command), 15000);
+            });
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : String(error));
+          }
+        });
+      }
+
+      if (organizationOptIn) {
+        const allow = actions.createEl("button", { text: t("settingsClaudeOrgAllow") });
+        allow.addClass("mod-cta");
+        allow.addEventListener("click", () => {
+          new ClaudeOrganizationConsentModal(this.app, () => {
+            runtime.setClaudeOrganizationPlans(true);
+            void this.checkNativeRuntime(provider);
+          }).open();
+        });
+      } else if (provider === "claude" && runtime.allowsClaudeOrganizationPlans()) {
+        actions.createEl("button", { text: t("settingsClaudeOrgRevoke") }).addEventListener("click", () => {
+          runtime.setClaudeOrganizationPlans(false);
+          void this.checkNativeRuntime(provider);
+        });
+      }
+
+      new Setting(card)
+        .setName(t("settingsRuntimeCustomPath"))
+        .setDesc(t("settingsRuntimeCustomPathDesc"))
+        .addText((text) => {
+          text
+            .setPlaceholder(provider === "claude" ? "claude" : "agy")
+            .setValue(customPath)
+            .onChange((value) => {
+              customPath = value;
+            });
+        })
+        .addButton((button) => {
+          button.setButtonText("Apply").onClick(() => {
+            runtime.setCustomPath(provider, customPath);
+            void this.checkNativeRuntime(provider);
+          });
+        });
+    };
+
+    paint();
+    this.runtimeSubscriptions.push(runtime.onChange(paint));
+    if (runtime.getSnapshot(provider).status === "unknown") {
+      void this.checkNativeRuntime(provider, { silent: true });
+    }
+  }
+
+  private async checkNativeRuntime(provider: NativeRuntimeProvider, options: { silent?: boolean } = {}): Promise<void> {
+    const snapshot = await getNativeRuntime().diagnose(provider);
+    if (provider === "gemini" && snapshot.status === "ready") {
+      this.addRuntimeGeminiModels(snapshot.models);
+    }
+    if (!options.silent) {
+      new Notice(`${provider === "claude" ? "Claude" : "Gemini"} Plan: ${runtimeStatusLabel(snapshot)}`);
+    }
+  }
+
+  // Antigravity's catalog changes over time; offer every Gemini model it lists.
+  private addRuntimeGeminiModels(models: NativeRuntimeSnapshot["models"]): void {
+    let next = this.plugin.settingsStore.settings;
+    let changed = false;
+    for (const runtimeModel of models) {
+      if (next.chatModels.some((model) => model.providerId === "gemini-plan" && model.model === runtimeModel.id)) continue;
+      next = upsertChatModel(next, {
+        id: createModelId("gemini-plan", `${runtimeModel.id}-plan`),
+        providerType: "gemini-plan",
+        providerId: "gemini-plan",
+        label: `${runtimeModel.label} (Plan)`,
+        model: runtimeModel.id,
+        supportsGrounding: false,
+        supportsJsonSchema: false,
+        supportsJsonObject: true,
+        supportsAnnotations: false,
+      });
+      changed = true;
+    }
+    if (changed) this.saveSettings(next);
   }
 
   private renderProviderSection(containerEl: HTMLElement, settings: AISettings): void {

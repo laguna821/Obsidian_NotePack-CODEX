@@ -87,7 +87,7 @@ export class VaultService {
   private escapeFrontmatterValue(value: string): string {
     const trimmed = value.trim();
     if (!trimmed) return "";
-    if (/[:#\n\r"'\\\[\]{}&*!|>%@`?]/.test(trimmed)) {
+    if (/[:#\n\r"'\\[\]{}&*!|>%@`?]/.test(trimmed)) {
       const escaped = trimmed.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       return `"${escaped}"`;
     }

@@ -1,4 +1,4 @@
-# NotePack CODEX v4.0.1
+# NotePack CODEX v4.0.2
 
 <img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
 
@@ -59,7 +59,7 @@ The Korean documentation below is the canonical version maintained by the author
 | 🔐 보안 | 저장돼 있던 Claude·Gemini Plan 토큰과 내장 Google OAuth 시크릿 제거, API 키·게이트웨이 과금 경로 자동 차단 |
 | 🛑 취소 | 카드 팩·통합 인사이트 생성 중 창을 닫으면 요청과 CLI 프로세스도 함께 중단 |
 
-> 자세한 내용은 [RELEASE_NOTES_4.0.0.md](RELEASE_NOTES_4.0.0.md), 연결 방법은 아래 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 보세요. 4.0.1은 Obsidian 커뮤니티 심사 규칙에 맞춘 정리 릴리즈입니다([RELEASE_NOTES_4.0.1.md](RELEASE_NOTES_4.0.1.md)).
+> 자세한 내용은 [RELEASE_NOTES_4.0.0.md](RELEASE_NOTES_4.0.0.md), 연결 방법은 아래 [🧬 AI 모델 지원](#-ai-모델-지원-api-키--구독-plan) 절을 보세요. 4.0.1과 4.0.2는 Obsidian 커뮤니티 심사 규칙에 맞춘 정리 릴리즈입니다([RELEASE_NOTES_4.0.1.md](RELEASE_NOTES_4.0.1.md), [RELEASE_NOTES_4.0.2.md](RELEASE_NOTES_4.0.2.md)). 4.0.2부터 Obsidian 1.7.2 이상이 필요합니다.
 
 ---
 

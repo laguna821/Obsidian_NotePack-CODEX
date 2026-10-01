@@ -141,7 +141,7 @@ export default class NotePackPlugin extends Plugin {
     this.installFileExplorerToolbarButton();
 
     this.addSettingTab(new NotePackSettingTab(this.app, this));
-    console.log(`NotePack CODEX loaded. v${this.manifest.version}`);
+    console.debug(`NotePack CODEX loaded. v${this.manifest.version}`);
   }
 
   async onunload(): Promise<void> {
@@ -149,7 +149,7 @@ export default class NotePackPlugin extends Plugin {
     terminateAllNativeProcesses();
     await closeOAuthCallbackServer();
     await this.settingsStore?.flushSave();
-    console.log("NotePack CODEX unloaded.");
+    console.debug("NotePack CODEX unloaded.");
   }
 
   async openLastWorkbenchOrChooser(): Promise<void> {

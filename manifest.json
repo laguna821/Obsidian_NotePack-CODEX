@@ -1,8 +1,8 @@
 {
   "id": "achmage-notepack-codex",
   "name": "NotePack CODEX",
-  "version": "4.0.1",
-  "minAppVersion": "1.4.0",
+  "version": "4.0.2",
+  "minAppVersion": "1.7.2",
   "description": "Board-first thinking workbench with quiet AI enrichment and per-note card pack generation.",
   "author": "Achmage",
   "isDesktopOnly": false

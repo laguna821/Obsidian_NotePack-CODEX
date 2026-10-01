@@ -11,6 +11,7 @@ type ChildProcess = import("child_process").ChildProcess;
  * and the unit tests never touch them. The bundle keeps this dynamic require.
  */
 export function requireNode<T>(id: string): T {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred Node require so the plugin still loads on mobile
   return require(id) as T;
 }
 

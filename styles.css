@@ -27,7 +27,7 @@
   --np-rarity-epic: #b26bff;
   --np-rarity-legendary: #ffb14f;
 
-  /* AI blue (UX polish overrides) */
+  /* AI annotation palette (light theme defaults; .theme-dark overrides below) */
   --np-ai-blue: #155eef;
   --np-ai-blue-bg: color-mix(in srgb, #155eef 9%, var(--np-bg));
   --np-ai-blue-border: color-mix(in srgb, #155eef 34%, var(--np-border));
@@ -1071,7 +1071,7 @@
   min-height: 240px;
 }
 
-.np-composer-modal-pane--editor .np-md-toolbar {
+.np-composer-modal-pane--editor .np-md-toolbar.np-md-toolbar {
   display: flex;
 }
 
@@ -1806,9 +1806,9 @@
 .np-inspector-annotation {
   font-size: 13px;
   line-height: 1.5;
-  color: var(--np-text-muted);
+  color: var(--np-ai-blue);
   margin: 4px 0 0;
-  font-style: italic;
+  font-style: normal;
 }
 
 .np-inspector-annotations {
@@ -1819,32 +1819,44 @@
 }
 
 .np-inspector-annotation-card {
-  border: 1px solid var(--np-border);
+  border: 1px solid var(--np-ai-blue-border);
   border-radius: var(--np-radius-sm);
   padding: 10px;
-  background: var(--np-bg-secondary);
+  background: var(--np-ai-blue-bg);
+  box-shadow: inset 3px 0 0 var(--np-ai-blue);
 }
 
 .np-inspector-annotation-card--error {
   border-color: color-mix(in srgb, var(--text-error) 45%, var(--np-border));
+  background: color-mix(in srgb, var(--text-error) 8%, var(--np-bg));
+  box-shadow: inset 3px 0 0 var(--text-error);
 }
 
 .np-inspector-annotation-card--running {
   border-color: color-mix(in srgb, var(--np-accent) 45%, var(--np-border));
+  box-shadow: inset 3px 0 0 var(--np-accent);
 }
 
 .np-inspector-annotation-header {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
   align-items: center;
-  margin-bottom: 4px;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
 }
 
 .np-inspector-annotation-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 700;
-  color: var(--np-text);
+  color: var(--np-ai-blue);
 }
 
 .np-inspector-annotation-status,
@@ -2194,6 +2206,108 @@
   color: var(--np-text-muted);
 }
 
+.np-pack-modal-grid--skeleton {
+  margin-bottom: 14px;
+  pointer-events: none;
+}
+
+.np-pack-card-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--np-bg-secondary);
+  border: 1px solid var(--np-border);
+  border-radius: 10px;
+  min-height: 180px;
+  opacity: 0;
+  animation:
+    np-pack-card-enter 360ms ease-out forwards,
+    np-skeleton-shimmer 1.6s linear infinite;
+}
+
+.np-pack-card-skeleton-badge {
+  width: 64px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--np-bg-tertiary) 0%,
+    var(--np-border) 50%,
+    var(--np-bg-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  animation: np-skeleton-shimmer 1.6s linear infinite;
+}
+
+.np-pack-card-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--np-bg-tertiary) 0%,
+    var(--np-border) 50%,
+    var(--np-bg-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  animation: np-skeleton-shimmer 1.6s linear infinite;
+}
+
+.np-pack-card-skeleton-line--name {
+  height: 18px;
+  width: 72%;
+  margin-top: 2px;
+}
+
+.np-pack-card-skeleton-line--hook {
+  width: 92%;
+  height: 10px;
+}
+
+.np-pack-card-skeleton-line--question {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.np-pack-card-skeleton-line--question-short {
+  width: 58%;
+}
+
+@keyframes np-skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.np-pack-modal-stage-text {
+  text-align: center;
+  font-size: 13px;
+  color: var(--np-text-muted);
+  padding: 4px 0 12px;
+  letter-spacing: 0.02em;
+}
+
+.np-pack-modal-reroll--busy {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.np-pack-card--entering {
+  opacity: 1;
+  transform: translateY(0);
+  animation: np-pack-card-enter 350ms ease-out forwards;
+}
+
+@keyframes np-pack-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .np-pack-modal-error {
   text-align: center;
   padding: 32px;
@@ -2501,6 +2615,22 @@
   margin-top: 4px;
 }
 
+.notepack-settings-agent-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 900px;
+  margin-top: 16px;
+}
+
+.notepack-settings-agent-card .setting-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  border-top: 1px solid var(--np-border);
+  padding: 14px 0;
+}
+
 .notepack-settings-agent-card textarea {
   min-height: 70px;
 }
@@ -2730,56 +2860,12 @@
   border-color: var(--text-error);
 }
 
-.np-inspector-annotation-card.np-inspector-annotation-card {
-  border-color: var(--np-ai-blue-border);
-  background: var(--np-ai-blue-bg);
-  box-shadow: inset 3px 0 0 var(--np-ai-blue);
-}
-
 .np-inspector-annotation-card--sequential {
   box-shadow: inset 3px 0 0 var(--np-ai-blue), 0 0 0 1px color-mix(in srgb, var(--np-ai-blue) 10%, transparent);
 }
 
-.np-inspector-annotation-agent.np-inspector-annotation-agent {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--np-ai-blue);
-}
-
-.np-inspector-annotation.np-inspector-annotation {
-  color: var(--np-ai-blue);
-  font-style: normal;
-}
-
-.np-inspector-annotation-card--error.np-inspector-annotation-card--error {
-  background: color-mix(in srgb, var(--text-error) 8%, var(--np-bg));
-  box-shadow: inset 3px 0 0 var(--text-error);
-}
-
-.np-inspector-annotation-card--running.np-inspector-annotation-card--running {
-  box-shadow: inset 3px 0 0 var(--np-accent);
-}
-
-.notepack-settings-agent-grid.notepack-settings-agent-grid {
-  display: flex;
-  grid-template-columns: none;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 900px;
-  margin-top: 16px;
-}
-
 .notepack-settings-agent-card {
   width: 100%;
-}
-
-.notepack-settings-agent-card.notepack-settings-agent-card .setting-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
-  border-top: 1px solid var(--np-border);
-  padding: 14px 0;
 }
 
 .notepack-settings-agent-card .setting-item-info {
@@ -2953,11 +3039,52 @@
   border-color: var(--np-accent, var(--np-text));
 }
 
+.notepack-settings-persona-preset-button--active {
+  background: var(--np-bg-secondary);
+  border-color: var(--np-accent, var(--np-text));
+  font-weight: 600;
+}
+
+.notepack-settings-difficulty-isolation {
+  margin: -4px 0 16px 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--np-text-muted);
+  background: var(--np-bg-secondary);
+  border-left: 3px solid var(--np-accent, var(--np-text));
+  border-radius: 4px;
+}
+
+.notepack-settings-difficulty-section {
+  margin-top: 16px;
+}
+
 .notepack-settings-persona-custom-instruction.notepack-settings-persona-custom-instruction {
+  width: 100%;
+  box-sizing: border-box;
   min-height: 220px;
   font-family: var(--font-monospace, monospace);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.notepack-settings-difficulty-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 16px 0 12px 0;
+}
+
+.notepack-settings-difficulty-custom-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--np-text);
+}
+
+.notepack-settings-difficulty-custom-desc {
+  font-size: 12px;
+  color: var(--np-text-muted);
+  margin-bottom: 4px;
 }
 
 .notepack-settings-inline-warning {
@@ -2965,19 +3092,6 @@
   font-size: 11px;
   color: rgba(220, 38, 38, 0.85);
   font-style: italic;
-}
-
-.np-inspector-annotation-header.np-inspector-annotation-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: transparent;
-  border: none;
-  padding: 4px 0;
-  cursor: pointer;
-  color: inherit;
-  text-align: left;
 }
 
 .np-inspector-annotation-toggle {
@@ -3149,3 +3263,91 @@
   border-color: var(--np-accent, var(--np-text));
   color: var(--np-text);
 }
+
+/* Settings headings rendered with Setting().setHeading() (Obsidian review). */
+.notepack-settings .setting-item.np-settings-heading {
+  padding: 0;
+  margin: 0 0 8px;
+  border: none;
+}
+
+.notepack-settings .np-settings-heading .setting-item-name {
+  font-weight: 600;
+}
+
+.notepack-settings .np-settings-heading--card .setting-item-name {
+  font-size: 14px;
+}
+
+.notepack-settings .np-settings-heading--sub {
+  margin-bottom: 4px;
+}
+
+.notepack-settings .np-settings-heading--sub .setting-item-name {
+  font-size: 13px;
+}
+
+.notepack-settings-agent-card-header .setting-item.np-settings-heading {
+  flex: 1;
+  margin: 0;
+}
+
+.np-settings-narrow-input {
+  width: 5em;
+}
+
+/* Resize drags set these on <body> instead of inline styles. */
+body.np-is-resizing-vertical {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+body.np-is-resizing-horizontal {
+  cursor: ew-resize;
+  user-select: none;
+}
+
+/* Obsidian 1.13+ declarative settings: one row hosts a whole NotePack section. */
+.setting-item.np-settings-host {
+  display: block;
+  padding: 0;
+  border: none;
+}
+
+.setting-item.np-settings-host > .setting-item-info,
+.setting-item.np-settings-host > .setting-item-control {
+  display: none;
+}
+
+.notepack-settings.np-settings-host-body {
+  padding-bottom: 0;
+}
+
+.np-settings-host-body > .notepack-settings-section:first-child {
+  margin-top: 0;
+}
+
+/* Setting rows in the narrow plan cards put the label above the input;
+   side by side, the label shrank to zero width and stretched the card. */
+.notepack-settings-grid .notepack-settings-card .setting-item:not(.setting-item-heading) {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notepack-settings-grid .notepack-settings-card .setting-item:not(.setting-item-heading) > .setting-item-info,
+.notepack-settings-grid .notepack-settings-card .setting-item:not(.setting-item-heading) > .setting-item-control {
+  flex: 1 1 100%;
+}
+
+/* Simple pack preferences: follows the active Obsidian theme. */
+.np-pack-modal button[hidden] { display: none; }
+.np-pack-preference-panel { flex: 0 0 auto; }
+.np-pack-preference-panel > summary { cursor: pointer; padding: 12px; }
+.np-pack-preference-panel[open] { max-height: 55vh; overflow-y: auto; }
+.np-pack-preference-field { min-width: 0; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); margin: 12px 0; padding: 12px; }
+.np-pack-preferences .setting-item { padding: 8px 0; }
+.np-pack-preferences details > p { color: var(--text-muted); font-size: var(--font-ui-small); }
+.np-pack-preferences summary { cursor: pointer; padding: 8px 0; }
+.np-pack-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.np-pack-preferences select { max-width: 100%; }
+@media (max-width: 600px) { .np-pack-preferences .setting-item { flex-wrap: wrap; gap: 8px; } .np-pack-preferences .setting-item-control { flex: 1 1 100%; justify-content: flex-start; } .np-pack-preferences select { width: 100%; } }

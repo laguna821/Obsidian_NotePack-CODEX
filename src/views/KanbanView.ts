@@ -3,7 +3,7 @@
 import type { App } from "obsidian";
 import type { WorkbenchDocumentStore } from "../stores/WorkbenchDocumentStore";
 import type { ContentType } from "../types";
-import { CONTENT_TYPE_LABELS, CONTENT_TYPE_ICONS, ALL_CONTENT_TYPES } from "../types";
+import { CONTENT_TYPE_LABELS, CONTENT_TYPE_ICONS } from "../types";
 import { CardElement } from "../components/CardElement";
 
 // The kanban column order (subset of content types that are most useful)

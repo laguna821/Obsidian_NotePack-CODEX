@@ -9,7 +9,12 @@ const SECRET_PATTERNS = [
   /sk-or-v1-[A-Za-z0-9_-]{20,}/g,
   /AIza[0-9A-Za-z_-]{20,}/g,
   /xox[baprs]-[0-9A-Za-z-]{20,}/g,
+  // Google OAuth client secrets. NotePack 4.0 removed the embedded Gemini CLI
+  // client; this keeps one from coming back.
+  /GOCSPX-[A-Za-z0-9_-]{20,}/g,
 ];
+// The bundle holds third-party code, so only unambiguous patterns apply to it.
+const BUNDLE_PATTERNS = [/GOCSPX-[A-Za-z0-9_-]{20,}/g];
 
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -29,9 +34,9 @@ async function walk(dir) {
 const findings = [];
 for (const file of await walk(ROOT)) {
   const rel = path.relative(ROOT, file);
-  if (rel === 'main.js' || rel === 'package-lock.json') continue;
+  if (rel === 'package-lock.json') continue;
   const content = await readFile(file, 'utf8');
-  SECRET_PATTERNS.forEach((pattern) => {
+  (rel === 'main.js' ? BUNDLE_PATTERNS : SECRET_PATTERNS).forEach((pattern) => {
     const matches = content.match(pattern);
     if (matches) findings.push(`${rel}: ${matches.length} possible secret(s)`);
   });

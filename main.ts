@@ -2,6 +2,7 @@ import {
   type Menu,
   Modal,
   Notice,
+  Platform,
   Plugin,
   type TAbstractFile,
   TFile,
@@ -19,10 +20,18 @@ import { CardPopoutView, CARD_POPOUT_VIEW_TYPE } from "./src/views/CardPopoutVie
 import { createEmptyCodexDocument, serializeCodexDocument } from "./src/data/codex-document";
 import { migrateLegacyProjectsToCodexFiles } from "./src/data/legacy-migration";
 import { GlobalSettingsStore } from "./src/stores/GlobalSettingsStore";
+import { setNativeRuntimeAvailability, upsertProvider } from "./src/ai/settings-registry";
+import { setProviderOAuthStore } from "./src/ai/providers";
+import { terminateAllNativeProcesses } from "./src/ai/native/process";
+import { setNativeRuntimeDeviceStore } from "./src/ai/native/runtime";
+import { closeOAuthCallbackServer } from "./src/ai/oauth";
 
 class WorkbenchChooserModal extends Modal {
-  constructor(private readonly plugin: NotePackPlugin) {
+  private readonly plugin: NotePackPlugin;
+
+  constructor(plugin: NotePackPlugin) {
     super(plugin.app);
+    this.plugin = plugin;
   }
 
   onOpen(): void {
@@ -34,16 +43,16 @@ class WorkbenchChooserModal extends Modal {
 
     const createButton = contentEl.createEl("button", { text: "Create new workbench" });
     createButton.addClass("mod-cta");
-    createButton.addEventListener("click", async () => {
+    createButton.addEventListener("click", () => {
       this.close();
-      await this.plugin.createNewWorkbench();
+      void this.plugin.createNewWorkbench();
     });
 
     const lastPath = this.plugin.settingsStore.lastOpenedWorkbenchPath;
     if (lastPath) {
-      contentEl.createEl("button", { text: `Open last: ${lastPath}` }).addEventListener("click", async () => {
+      contentEl.createEl("button", { text: `Open last: ${lastPath}` }).addEventListener("click", () => {
         this.close();
-        await this.plugin.openLastWorkbench();
+        void this.plugin.openLastWorkbench();
       });
     }
 
@@ -51,9 +60,9 @@ class WorkbenchChooserModal extends Modal {
     if (recent.length > 0) {
       contentEl.createEl("h3", { text: "Recent workbenches" });
       recent.slice(0, 8).forEach((path) => {
-        contentEl.createEl("button", { text: path }).addEventListener("click", async () => {
+        contentEl.createEl("button", { text: path }).addEventListener("click", () => {
           this.close();
-          await this.plugin.openWorkbenchPath(path);
+          void this.plugin.openWorkbenchPath(path);
         });
       });
     }
@@ -68,21 +77,42 @@ export default class NotePackPlugin extends Plugin {
   settingsStore!: GlobalSettingsStore;
 
   async onload(): Promise<void> {
-    const savedData = await this.loadData();
+    const savedData: unknown = await this.loadData();
     this.settingsStore = new GlobalSettingsStore(savedData);
     this.settingsStore.setSaveCallback(async (data) => {
       await this.saveData(data);
     });
 
-    if (this.settingsStore.migrationsApplied.includes("gemini-plan-tokens-cleared")) {
-      new Notice(
-        "보안 업데이트: 평문 시크릿이 제거되어 Gemini Plan 연결이 해제되었습니다. 본인 GCP OAuth 클라이언트로 다시 연결하거나 Gemini API Key 모드를 사용하세요.",
-        12000,
-      );
+    setLanguage(this.settingsStore.settings.uiLanguage);
+
+    if (this.settingsStore.migrationsApplied.includes("plan-oauth-tokens-removed")) {
+      new Notice(t("migrationPlanTokensRemoved"), 15000);
       await this.settingsStore.flushSave();
     }
 
-    setLanguage(this.settingsStore.settings.uiLanguage);
+    // Claude/Gemini Plan spawn desktop CLIs; on mobile they report unavailable.
+    setNativeRuntimeAvailability(Platform.isDesktop);
+    // The Team/Enterprise consent and executable paths belong to this device,
+    // so they stay in Obsidian's local storage instead of the synced plugin data.
+    setNativeRuntimeDeviceStore({
+      get: (key) => {
+        const value: unknown = this.app.loadLocalStorage(key);
+        return typeof value === "string" ? value : undefined;
+      },
+      set: (key, value) => this.app.saveLocalStorage(key, value ?? null),
+    });
+    // OpenAI Plan requests read the latest tokens and save refreshed ones here;
+    // each request only holds a copy of the provider.
+    setProviderOAuthStore({
+      read: (providerId) => this.settingsStore.settings.providers.find((item) => item.id === providerId)?.oauth,
+      write: (providerId, oauth, previousRefreshToken) => {
+        const current = this.settingsStore.settings;
+        const provider = current.providers.find((item) => item.id === providerId);
+        // The user disconnected or reconnected while the request ran.
+        if (!provider?.oauth || provider.oauth.refreshToken !== previousRefreshToken) return;
+        this.settingsStore.updateSettings(upsertProvider(current, { ...provider, oauth }));
+      },
+    });
 
     this.registerView(CODEX_FILE_VIEW_TYPE, (leaf) => new CodexFileView(leaf, this));
     this.registerExtensions(["codex"], CODEX_FILE_VIEW_TYPE);
@@ -90,42 +120,47 @@ export default class NotePackPlugin extends Plugin {
     this.registerView(CARD_POPOUT_VIEW_TYPE, (leaf) => new CardPopoutView(leaf, this));
 
     this.addRibbonIcon("layers", "NotePack CODEX", () => {
-      this.openLastWorkbenchOrChooser();
+      void this.openLastWorkbenchOrChooser();
     });
 
     this.addCommand({
       id: "create-notepack-codex-workbench",
-      name: "Create new NotePack CODEX workbench",
+      name: "Create new workbench",
       callback: () => this.createNewWorkbench(),
     });
 
     this.addCommand({
       id: "open-last-notepack-codex-workbench",
-      name: "Open last NotePack CODEX workbench",
+      name: "Open last workbench",
       callback: () => this.openLastWorkbenchOrChooser(),
     });
 
     this.addCommand({
       id: "open-notepack-codex-home",
-      name: "Open NotePack CODEX home",
+      name: "Open home",
       callback: () => this.openHomeView(),
     });
 
     this.addCommand({
       id: "migrate-notepack-codex-legacy-projects",
-      name: "Migrate legacy NotePack CODEX projects to .codex files",
+      name: "Migrate legacy projects to .codex files",
       callback: () => this.migrateLegacyProjects(),
     });
 
     this.installFolderContextMenuHook();
+    this.installFileExplorerToolbarButton();
 
     this.addSettingTab(new NotePackSettingTab(this.app, this));
-    console.log(`NotePack CODEX loaded. v${this.manifest.version}`);
+    console.debug(`NotePack CODEX loaded. v${this.manifest.version}`);
   }
 
-  async onunload(): Promise<void> {
-    await this.settingsStore?.flushSave();
-    console.log("NotePack CODEX unloaded.");
+  onunload(): void {
+    setProviderOAuthStore(null);
+    setNativeRuntimeDeviceStore(undefined);
+    terminateAllNativeProcesses();
+    void closeOAuthCallbackServer();
+    void this.settingsStore?.flushSave();
+    console.debug("NotePack CODEX unloaded.");
   }
 
   async openLastWorkbenchOrChooser(): Promise<void> {
@@ -173,7 +208,7 @@ export default class NotePackPlugin extends Plugin {
       const target = ourTitle();
       for (const titleNode of Array.from(titles)) {
         if (titleNode.textContent === target) {
-          return titleNode.closest(".menu-item") as HTMLElement | null;
+          return titleNode.closest(".menu-item");
         }
       }
       return null;
@@ -186,7 +221,7 @@ export default class NotePackPlugin extends Plugin {
       for (const titleNode of Array.from(titles)) {
         const text = titleNode.textContent?.trim() ?? "";
         if (text === "새 드로잉" || text === "New drawing") {
-          return titleNode.closest(".menu-item") as HTMLElement | null;
+          return titleNode.closest(".menu-item");
         }
       }
       return null;
@@ -211,7 +246,7 @@ export default class NotePackPlugin extends Plugin {
         (file !== null && typeof file === "object" && "children" in (file as object));
       if (!isFolder) return;
       handledMenus.add(menu);
-      const folderPath = (file as TFolder).path ?? "";
+      const folderPath = file.path ?? "";
       menu.addItem((item) => {
         item
           .setTitle(ourTitle())
@@ -220,6 +255,13 @@ export default class NotePackPlugin extends Plugin {
             await this.createNewWorkbenchAt(folderPath);
           });
       });
+      // Mark the menu's DOM element so the DOM-injection MutationObserver
+      // path knows the API path has already added our item — even if the
+      // DOM render of the API-added item is delayed past observer fire time.
+      const menuEl = (menu as unknown as { dom?: HTMLElement }).dom;
+      if (menuEl instanceof HTMLElement) {
+        menuEl.dataset.notepackHandled = "1";
+      }
     };
 
     this.registerEvent(this.app.workspace.on("file-menu", addViaApi));
@@ -246,6 +288,11 @@ export default class NotePackPlugin extends Plugin {
       return false;
     };
 
+    // Per-menu cleanup callbacks for document-level mousedown listeners that
+    // we register when injecting our item. Keyed by the menu element so we can
+    // tear listeners down when the menu is removed (closed via Esc, blur, etc.).
+    const menuCleanups = new WeakMap<HTMLElement, () => void>();
+
     let pendingFolderPath: string | null = null;
     const onContextMenu = (evt: MouseEvent) => {
       const target = evt.target as HTMLElement | null;
@@ -264,26 +311,88 @@ export default class NotePackPlugin extends Plugin {
     this.register(() => document.removeEventListener("contextmenu", onContextMenu, true));
 
     const injectIntoDomMenu = (menuEl: HTMLElement, folderPath: string) => {
+      // If the API path already attached our item to this menu (marker set
+      // in addViaApi), skip DOM injection entirely to avoid duplicate items
+      // and the resulting double-fire on click.
+      if (menuEl.dataset.notepackHandled === "1") return;
       if (findOurItem(menuEl)) return;
 
-      const item = document.createElement("div");
+      const item = createDiv();
       item.className = "menu-item";
       item.setAttribute("tabindex", "0");
 
-      const iconEl = document.createElement("div");
+      const iconEl = createDiv();
       iconEl.className = "menu-item-icon";
       setIcon(iconEl, "layers");
       item.appendChild(iconEl);
 
-      const titleEl = document.createElement("div");
+      const titleEl = createDiv();
       titleEl.className = "menu-item-title";
       titleEl.textContent = ourTitle();
       item.appendChild(titleEl);
 
-      item.addEventListener("click", () => {
+      // Obsidian's built-in Menu (used by the default file-explorer's empty-area
+      // context menu) closes itself on `mousedown` via a listener on document.
+      // A naive `addEventListener("click", ...)` on our DOM-injected item never
+      // fires because the menu element is detached before mouseup, and even an
+      // item-level `pointerdown`/`mousedown` listener can be beaten by
+      // Obsidian's own document-level handler depending on registration order
+      // and dispatch path.
+      //
+      // Strategy: register a document-level CAPTURE-phase mousedown listener
+      // when we inject the item. Capture-phase listeners on `document` are the
+      // earliest point we can observe the event, before it reaches any
+      // descendant (including .menu). We stopImmediatePropagation so Obsidian's
+      // own close handler can't fire its callback ahead of our create. A
+      // single-shot `handled` guard prevents double-fire if the item-level
+      // fallback also runs.
+      let handled = false;
+      const fire = () => {
+        if (handled) return;
+        handled = true;
+        cleanup();
         void this.createNewWorkbenchAt(folderPath);
         menuEl.detach?.();
         if (menuEl.parentElement) menuEl.remove();
+      };
+      const docHandler = (evt: MouseEvent | PointerEvent) => {
+        if (evt.button !== 0) return;
+        const target = evt.target as Node | null;
+        if (!target || !item.contains(target)) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        evt.stopImmediatePropagation();
+        fire();
+      };
+      const cleanup = () => {
+        document.removeEventListener("pointerdown", docHandler, true);
+        document.removeEventListener("mousedown", docHandler, true);
+        menuCleanups.delete(menuEl);
+      };
+      // Cover both pointerdown (fires earlier) and mousedown (some browsers /
+      // some Obsidian versions only stop one of them).
+      document.addEventListener("pointerdown", docHandler, true);
+      document.addEventListener("mousedown", docHandler, true);
+      menuCleanups.set(menuEl, cleanup);
+
+      // Belt-and-braces: item-level listeners for the case where document
+      // capture is bypassed entirely. `handled` guards idempotency.
+      item.addEventListener("pointerdown", (evt) => {
+        if (evt.button !== 0) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        fire();
+      });
+      item.addEventListener("mousedown", (evt) => {
+        if (evt.button !== 0) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        fire();
+      });
+      item.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        fire();
       });
 
       // Mimic Obsidian's keyboard-nav highlight on hover so our DOM-injected
@@ -307,8 +416,16 @@ export default class NotePackPlugin extends Plugin {
     const observer = new MutationObserver((mutations) => {
       const folderPath = pendingFolderPath;
       for (const m of mutations) {
+        // Tear down per-menu listeners when the menu element is removed from
+        // the body (covers Esc, blur, click-elsewhere — anything that closes
+        // the menu without triggering our injected item's path).
+        for (const node of Array.from(m.removedNodes)) {
+          if (!node.instanceOf(HTMLElement)) continue;
+          const cleanup = menuCleanups.get(node);
+          cleanup?.();
+        }
         for (const node of Array.from(m.addedNodes)) {
-          if (!(node instanceof HTMLElement)) continue;
+          if (!node.instanceOf(HTMLElement)) continue;
           if (!node.classList.contains("menu")) continue;
           // DOM-injection path: only if right-click captured a folder path.
           if (folderPath !== null) {
@@ -322,6 +439,65 @@ export default class NotePackPlugin extends Plugin {
     });
     observer.observe(document.body, { childList: true, subtree: false });
     this.register(() => observer.disconnect());
+  }
+
+  // File-explorer header toolbar button — adds a "새 메모 작업실" icon between
+  // Obsidian's "새 노트" and "새 폴더" buttons so that brand-new Obsidian users
+  // can discover the feature without right-clicking. Runs on every file
+  // explorer leaf currently open and re-installs on layout changes (covers
+  // newly opened explorers and re-renders that wipe the toolbar).
+  private installFileExplorerToolbarButton(): void {
+    const TOOLBAR_FLAG = "data-notepack-toolbar-button";
+    const NEW_NOTE_LABELS = new Set(["새 노트", "New note"]);
+    const ourLabel = () => t("newWorkbenchMenuItem");
+
+    const installInLeaf = (leaf: WorkspaceLeaf) => {
+      const view = leaf?.view;
+      if (!view || view.getViewType() !== "file-explorer") return;
+      const container = view.containerEl;
+      if (!container) return;
+      const navButtons = container.querySelector<HTMLElement>(".nav-buttons-container");
+      if (!navButtons) return;
+      if (navButtons.querySelector(`[${TOOLBAR_FLAG}]`)) return;
+
+      const button = createDiv();
+      button.className = "clickable-icon nav-action-button";
+      button.setAttribute("aria-label", ourLabel());
+      button.setAttribute(TOOLBAR_FLAG, "1");
+      setIcon(button, "layers");
+      button.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        void this.createNewWorkbench();
+      });
+
+      // Slot the button right after "새 노트"/"New note"; fall back to index 1
+      // (after the first button) if labels don't match, or append at end.
+      const allButtons = Array.from(
+        navButtons.querySelectorAll<HTMLElement>(".clickable-icon"),
+      );
+      const newNoteBtn = allButtons.find((b) => {
+        const label = b.getAttribute("aria-label") ?? "";
+        return NEW_NOTE_LABELS.has(label);
+      }) ?? allButtons[0] ?? null;
+      if (newNoteBtn?.nextSibling) {
+        navButtons.insertBefore(button, newNoteBtn.nextSibling);
+      } else if (newNoteBtn) {
+        navButtons.appendChild(button);
+      } else {
+        navButtons.appendChild(button);
+      }
+    };
+
+    const scanAll = () => {
+      this.app.workspace.iterateAllLeaves((leaf) => installInLeaf(leaf));
+    };
+
+    this.app.workspace.onLayoutReady(() => scanAll());
+    // Re-scan on workspace layout changes: covers newly opened explorers,
+    // sidebar toggles, and theme/plugin reloads that rebuild the header.
+    this.registerEvent(this.app.workspace.on("layout-change", () => scanAll()));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => scanAll()));
   }
 
   async createNewWorkbench(): Promise<void> {
@@ -346,14 +522,14 @@ export default class NotePackPlugin extends Plugin {
   async openWorkbenchFile(file: TFile): Promise<void> {
     const existingLeaf = this.findOpenWorkbenchLeaf(file.path);
     if (existingLeaf) {
-      this.app.workspace.revealLeaf(existingLeaf);
+      await this.app.workspace.revealLeaf(existingLeaf);
       this.settingsStore.rememberWorkbenchPath(file.path);
       return;
     }
 
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
     this.settingsStore.rememberWorkbenchPath(file.path);
   }
 
@@ -368,7 +544,7 @@ export default class NotePackPlugin extends Plugin {
   private async openHomeView(): Promise<void> {
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: NOTEPACK_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   private async ensureFolder(folder: string): Promise<void> {
@@ -376,9 +552,18 @@ export default class NotePackPlugin extends Plugin {
     const parts = folder.split("/");
     let current = "";
     for (const part of parts) {
+      if (!part) continue;
       current = current ? `${current}/${part}` : part;
-      if (!this.app.vault.getAbstractFileByPath(current)) {
+      if (this.app.vault.getAbstractFileByPath(current)) continue;
+      try {
         await this.app.vault.createFolder(current);
+      } catch (err) {
+        // Race / cache miss: another concurrent call (or Obsidian's own
+        // metadata cache) may have just made the folder visible. If the
+        // path now resolves, treat the error as benign and continue.
+        if (!this.app.vault.getAbstractFileByPath(current)) {
+          throw err;
+        }
       }
     }
   }

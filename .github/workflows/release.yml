@@ -12,22 +12,39 @@ permissions:
 
 jobs:
   release:
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The tests import TypeScript sources directly, which needs Node 22.18+.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Check versions match the tag
+        run: npm run check:versions -- "${{ github.ref_name }}"
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
       - name: Build plugin
         run: npm run build
+
+      - name: Check for secrets
+        run: npm run check:secrets
+
+      - name: Compare with the committed main.js
+        run: git diff --quiet -- main.js || echo "::warning::The committed main.js differs from this build. The release uses this build."
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v1
@@ -42,6 +59,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: NotePack CODEX ${{ github.ref_name }}
+          body_path: RELEASE_NOTES_${{ github.ref_name }}.md
           files: |
             main.js
             styles.css

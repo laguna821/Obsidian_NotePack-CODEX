@@ -28,7 +28,7 @@ export class WorkbenchDocumentStore {
   private document: CodexWorkbenchDocument;
   private listeners: Map<WorkbenchStoreEvent, Set<Listener>> = new Map();
   private saveCallback: ((document: CodexWorkbenchDocument) => void) | null = null;
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveTimer: number | null = null;
 
   selectedCardId: string | null = null;
   selectedCardIds: Set<string> = new Set();
@@ -45,8 +45,8 @@ export class WorkbenchDocumentStore {
   }
 
   private scheduleSave(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
+    if (this.saveTimer) window.clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => {
       this.document.updatedAt = Date.now();
       this.saveCallback?.(this.document);
       this.emit("document-changed");
@@ -55,7 +55,7 @@ export class WorkbenchDocumentStore {
 
   flushSave(): void {
     if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
+      window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
     this.document.updatedAt = Date.now();

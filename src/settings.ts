@@ -1,4 +1,17 @@
-import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
+import { renderPackPreferences } from "./components/PackPreferenceControls";
+import { normalizePackPreferences } from "./ai/pack-preferences";
+import {
+  App,
+  Modal,
+  Notice,
+  Platform,
+  PluginSettingTab,
+  Setting,
+  requireApiVersion,
+  type SettingDefinitionGroup,
+  type SettingDefinitionItem,
+  type SettingDefinitionRender,
+} from "obsidian";
 import type NotePackPlugin from "../main";
 import { setLanguage, t } from "./i18n";
 import {
@@ -27,26 +40,27 @@ import {
 import { PERSONA_PRESET_ENTRIES } from "./ai/persona-presets";
 import {
   PACK_DIFFICULTY_PRESETS,
-  SYNTHESIS_DIFFICULTY_PRESETS,
   type DifficultyPresetEntry,
 } from "./ai/difficulty-presets";
 import {
-  buildAnthropicPlanAuthorizeUrl,
-  buildGeminiPlanAuthorizeUrl,
-  resolveGeminiCredentials,
-  setupCodeAssistUser,
+  OPENAI_REDIRECT_URIS,
   buildOpenAIPlanAuthorizeUrl,
+  closeOAuthCallbackServer,
   createOAuthState,
   createPkcePair,
-  exchangeAnthropicPlanCode,
-  exchangeGeminiPlanCode,
   exchangeOpenAIPlanCode,
   extractOpenAIAccountId,
+  isOAuthLoginCancelled,
+  listenForOAuthCallback,
   parseOAuthParam,
-  waitForOAuthCallback,
 } from "./ai/oauth";
+import { getNativeRuntime } from "./ai/native/runtime";
+import { confirmAction } from "./components/ConfirmModal";
+import type { NativeRuntimeProvider, NativeRuntimeSnapshot } from "./ai/native/types";
 import type {
   AIChatModel,
+  AIClaudeEffort,
+  AIReasoningEffort,
   AIOAuthState,
   AIProviderAdditionalSettings,
   AIProviderRecord,
@@ -122,17 +136,6 @@ function buildProviderOptions(): AIProviderType[] {
   return getProviderDefinitions()
     .map((definition) => definition.type)
     .filter((type) => !isPlanProviderType(type));
-}
-
-function describeModelCapabilities(model: AIChatModel): string {
-  const caps: string[] = [];
-  if (model.supportsGrounding) caps.push("grounding");
-  if (model.supportsJsonSchema) caps.push("json-schema");
-  if (model.supportsJsonObject ?? true) caps.push("json-object");
-  if (model.supportsAnnotations) caps.push("annotations");
-  if (model.reasoning?.enabled) caps.push(`reasoning:${model.reasoning.reasoning_effort ?? "medium"}`);
-  if (model.thinking?.enabled) caps.push(`thinking:${model.thinking.budget_tokens ?? "default"}`);
-  return caps.length > 0 ? caps.join(", ") : "basic";
 }
 
 function languageModeToSettingValue(
@@ -258,7 +261,7 @@ class ProviderModal extends Modal {
       });
 
     if (!this.provider && this.providerIdLocked) {
-      providerIdSetting.descEl.createEl("div", {
+      providerIdSetting.descEl.createDiv({
         text: t("settingsProviderIdLockedHint"),
         cls: "notepack-modal-provider-id-locked-hint",
       });
@@ -380,7 +383,7 @@ class ProviderModal extends Modal {
         const row = section.createDiv({ cls: "notepack-modal-model-row" });
         const info = row.createDiv({ cls: "notepack-modal-model-row-info" });
         info.createEl("strong", { text: model.label });
-        info.createEl("span", { text: model.model });
+        info.createSpan({ text: model.model });
 
         const actions = row.createDiv({ cls: "notepack-modal-model-row-actions" });
         actions.createEl("button", { text: t("settingsEditBtn") }).addEventListener("click", () => {
@@ -462,9 +465,10 @@ class ChatModelModal extends Modal {
   private supportsJsonObject: boolean;
   private supportsAnnotations: boolean;
   private reasoningEnabled: boolean;
-  private reasoningEffort: "low" | "medium" | "high";
+  private reasoningEffort: AIReasoningEffort;
   private thinkingEnabled: boolean;
   private thinkingBudget: string;
+  private thinkingEffort: AIClaudeEffort | "";
 
   constructor(
     app: App,
@@ -492,6 +496,7 @@ class ChatModelModal extends Modal {
     this.reasoningEffort = model?.reasoning?.reasoning_effort ?? "medium";
     this.thinkingEnabled = Boolean(model?.thinking?.enabled);
     this.thinkingBudget = model?.thinking?.budget_tokens ? String(model.thinking.budget_tokens) : "";
+    this.thinkingEffort = model?.thinking?.effort ?? "";
   }
 
   onOpen(): void {
@@ -609,10 +614,18 @@ class ChatModelModal extends Modal {
         .setName("Reasoning effort")
         .setDesc("Relative effort hint for reasoning-capable models.")
         .addDropdown((dropdown) => {
-          dropdown.addOptions({ low: "Low", medium: "Medium", high: "High" });
+          dropdown.addOptions({
+            none: "None",
+            minimal: "Minimal",
+            low: "Low",
+            medium: "Medium",
+            high: "High",
+            xhigh: "Extra high",
+            max: "Max",
+          });
           dropdown.setValue(this.reasoningEffort);
           dropdown.onChange((value) => {
-            this.reasoningEffort = value as "low" | "medium" | "high";
+            this.reasoningEffort = value as AIReasoningEffort;
           });
         });
     }
@@ -629,10 +642,20 @@ class ChatModelModal extends Modal {
 
     if (this.thinkingEnabled) {
       new Setting(this.contentEl)
+        .setName("Thinking effort")
+        .setDesc("Claude 4.6+ and Claude Plan models: adaptive thinking effort. Leave empty for the default.")
+        .addDropdown((dropdown) => {
+          dropdown.addOptions({ "": "Default", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" });
+          dropdown.setValue(this.thinkingEffort);
+          dropdown.onChange((value) => {
+            this.thinkingEffort = value as AIClaudeEffort | "";
+          });
+        });
+      new Setting(this.contentEl)
         .setName("Thinking budget tokens")
-        .setDesc("Optional token budget for thinking mode.")
+        .setDesc("Only for older Claude models such as Haiku 4.5. Ignored by Claude 4.6+.")
         .addText((text) => {
-          text.setPlaceholder("8192").setValue(this.thinkingBudget).onChange((value) => {
+          text.setPlaceholder("4096").setValue(this.thinkingBudget).onChange((value) => {
             this.thinkingBudget = value;
           });
         });
@@ -677,7 +700,11 @@ class ChatModelModal extends Modal {
         supportsAnnotations: this.supportsAnnotations,
         reasoning: this.reasoningEnabled ? { enabled: true, reasoning_effort: this.reasoningEffort } : undefined,
         thinking: this.thinkingEnabled
-          ? { enabled: true, budget_tokens: parseOptionalNumber(this.thinkingBudget) }
+          ? {
+              enabled: true,
+              budget_tokens: parseOptionalNumber(this.thinkingBudget),
+              effort: this.thinkingEffort || undefined,
+            }
           : undefined,
       });
       this.close();
@@ -704,7 +731,7 @@ abstract class PlanConnectionModal extends Modal {
   protected setError(message = ""): void {
     if (!this.errorEl) return;
     this.errorEl.textContent = message;
-    this.errorEl.style.display = message ? "block" : "none";
+    this.errorEl.toggle(Boolean(message));
   }
 
   protected createFooter(): HTMLElement {
@@ -714,11 +741,13 @@ abstract class PlanConnectionModal extends Modal {
   }
 }
 
+type PkcePair = Awaited<ReturnType<typeof createPkcePair>>;
+
 class OpenAIPlanConnectionModal extends PlanConnectionModal {
   private redirectValue = "";
-  private pkceVerifier = "";
+  private pkce?: PkcePair;
   private state = "";
-  private authorizeUrl = "";
+  private redirectUri: string = OPENAI_REDIRECT_URIS[0];
 
   onOpen(): void {
     this.titleEl.setText("Connect OpenAI Plan");
@@ -730,7 +759,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
 
     this.statusEl = this.contentEl.createDiv({ cls: "notepack-settings-note" });
     this.errorEl = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    this.errorEl.style.display = "none";
+    this.errorEl.hide();
 
     new Setting(this.contentEl)
       .setName("OpenAI login")
@@ -745,7 +774,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
       .setName("Redirect URL (fallback)")
       .setDesc("Use this only if automatic connect fails. Paste the full redirect URL from your browser.")
       .addTextArea((text) => {
-        text.setPlaceholder("http://localhost:1455/auth/callback?code=...").onChange((value) => {
+        text.setPlaceholder(`${OPENAI_REDIRECT_URIS[0]}?code=...`).onChange((value) => {
           this.redirectValue = value;
           this.setError("");
         });
@@ -759,36 +788,49 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
     this.createFooter();
   }
 
-  private async ensureFlow(): Promise<void> {
-    if (this.authorizeUrl && this.pkceVerifier && this.state) return;
-    const pkce = await createPkcePair();
-    const state = createOAuthState();
-    this.pkceVerifier = pkce.verifier;
-    this.state = state;
-    this.authorizeUrl = buildOpenAIPlanAuthorizeUrl({ pkce, state });
+  onClose(): void {
+    void closeOAuthCallbackServer();
+    this.contentEl.empty();
+  }
+
+  private async ensureFlow(): Promise<PkcePair> {
+    if (!this.pkce || !this.state) {
+      this.pkce = await createPkcePair();
+      this.state = createOAuthState();
+    }
+    return this.pkce;
   }
 
   private async startAutomaticConnect(): Promise<void> {
     this.setError("");
     this.setStatus("Preparing login...");
 
+    let pending: Promise<string> | undefined;
     try {
-      await this.ensureFlow();
-      window.open(this.authorizeUrl, "_blank");
+      const pkce = await this.ensureFlow();
+      try {
+        const listener = await listenForOAuthCallback({ state: this.state, redirectUris: OPENAI_REDIRECT_URIS });
+        this.redirectUri = listener.redirectUri;
+        pending = listener.code;
+      } catch (listenError) {
+        // Without a local port the browser still shows the redirect URL,
+        // which the user can paste below.
+        console.error(listenError);
+        this.redirectUri = OPENAI_REDIRECT_URIS[0];
+      }
+      window.open(buildOpenAIPlanAuthorizeUrl({ pkce, state: this.state, redirectUri: this.redirectUri }), "_blank");
+      if (!pending) {
+        this.setStatus("");
+        this.setError("Automatic connect is unavailable. After logging in, paste the full redirect URL below.");
+        return;
+      }
       this.setStatus("Waiting for OpenAI authorization...");
-
-      const code = await waitForOAuthCallback({
-        state: this.state,
-        redirectUri: "http://localhost:1455/auth/callback",
-      });
-
-      const token = await exchangeOpenAIPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-      });
-
+      const code = await pending;
+      const token = await exchangeOpenAIPlanCode({ code, pkceVerifier: pkce.verifier, redirectUri: this.redirectUri });
       await this.completeConnection(token);
     } catch (error) {
+      // A newer login attempt or closing the dialog cancelled this one.
+      if (isOAuthLoginCancelled(error)) return;
       this.setStatus("");
       this.setError("Automatic connect failed. Paste the full redirect URL below and try again.");
       console.error(error);
@@ -797,7 +839,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
 
   private async finishWithRedirectUrl(): Promise<void> {
     this.setError("");
-    await this.ensureFlow();
+    const pkce = await this.ensureFlow();
 
     const code = parseOAuthParam(this.redirectValue, "code");
     const state = parseOAuthParam(this.redirectValue, "state");
@@ -811,11 +853,7 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
     }
 
     try {
-      const token = await exchangeOpenAIPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-      });
-
+      const token = await exchangeOpenAIPlanCode({ code, pkceVerifier: pkce.verifier, redirectUri: this.redirectUri });
       await this.completeConnection(token);
     } catch (error) {
       this.setError("Manual connect failed. Start login again and paste the newest redirect URL.");
@@ -838,356 +876,319 @@ class OpenAIPlanConnectionModal extends PlanConnectionModal {
   }
 }
 
-class GeminiPlanConnectionModal extends PlanConnectionModal {
-  private redirectValue = "";
-  private pkceVerifier = "";
-  private state = "";
-  private authorizeUrl = "";
+/** Explicit, device-local consent before Claude Plan uses an organization login. */
+class ClaudeOrganizationConsentModal extends Modal {
+  private readonly onConfirm: () => void;
+
+  constructor(app: App, onConfirm: () => void) {
+    super(app);
+    this.onConfirm = onConfirm;
+  }
 
   onOpen(): void {
-    this.titleEl.setText("Connect Gemini Plan");
+    this.titleEl.setText(t("settingsClaudeOrgConsentTitle"));
     this.contentEl.empty();
+    this.contentEl.createEl("p", { text: t("settingsClaudeOrgConsentIntro") });
+    const list = this.contentEl.createEl("ul");
+    for (const item of [
+      t("settingsClaudeOrgConsentItem1"),
+      t("settingsClaudeOrgConsentItem2"),
+      t("settingsClaudeOrgConsentItem3"),
+      t("settingsClaudeOrgConsentItem4"),
+    ]) {
+      list.createEl("li", { text: item });
+    }
+    this.contentEl.createEl("p", { text: t("settingsClaudeOrgConsentFooter"), cls: "notepack-settings-note" });
 
-    this.contentEl.createEl("p", {
-      text: "Log in with Google in your browser. NotePack will try to connect automatically when the callback arrives.",
-    });
-
-    this.statusEl = this.contentEl.createDiv({ cls: "notepack-settings-note" });
-    this.errorEl = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    this.errorEl.style.display = "none";
-
-    new Setting(this.contentEl)
-      .setName("Google login")
-      .setDesc("Browser login opens Gemini/Google authorization.")
-      .addButton((button) => {
-        button.setButtonText("Login to Google").setCta().onClick(() => {
-          void this.startAutomaticConnect();
-        });
-      });
-
-    new Setting(this.contentEl)
-      .setName("Redirect URL (fallback)")
-      .setDesc("Use this only if automatic connect fails. Paste the full redirect URL from your browser.")
-      .addTextArea((text) => {
-        text.setPlaceholder("http://localhost:8085/oauth2callback?code=...").onChange((value) => {
-          this.redirectValue = value;
-          this.setError("");
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText("Connect with URL").onClick(() => {
-          void this.finishWithRedirectUrl();
-        });
-      });
-
-    this.createFooter();
-  }
-
-  private getCredentials(): { clientId: string; clientSecret: string } {
-    const extra = this.provider.additionalSettings ?? {};
-    return resolveGeminiCredentials({
-      clientId: String(extra.geminiByoClientId ?? ""),
-      clientSecret: String(extra.geminiByoClientSecret ?? ""),
+    const footer = this.contentEl.createDiv({ cls: "notepack-settings-modal-actions" });
+    footer.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    const confirm = footer.createEl("button", { text: t("settingsClaudeOrgConsentConfirm") });
+    confirm.addClass("mod-warning");
+    confirm.addEventListener("click", () => {
+      this.close();
+      this.onConfirm();
     });
   }
 
-  private async ensureFlow(): Promise<boolean> {
-    const creds = this.getCredentials();
-    if (this.authorizeUrl && this.pkceVerifier && this.state) return true;
-    const pkce = await createPkcePair();
-    const state = createOAuthState();
-    this.pkceVerifier = pkce.verifier;
-    this.state = state;
-    this.authorizeUrl = buildGeminiPlanAuthorizeUrl({ pkce, state, clientId: creds.clientId });
-    return true;
-  }
-
-  private async startAutomaticConnect(): Promise<void> {
-    this.setError("");
-    this.setStatus("Preparing login...");
-
-    try {
-      const ready = await this.ensureFlow();
-      if (!ready) {
-        this.setStatus("");
-        return;
-      }
-      const creds = this.getCredentials();
-
-      window.open(this.authorizeUrl, "_blank");
-      this.setStatus("Waiting for Google authorization...");
-
-      const code = await waitForOAuthCallback({
-        state: this.state,
-        redirectUri: "http://localhost:8085/oauth2callback",
-      });
-
-      const token = await exchangeGeminiPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-        clientId: creds.clientId,
-        clientSecret: creds.clientSecret,
-      });
-
-      this.setStatus("Setting up Gemini Code Assist...");
-      let managedProjectId: string | undefined;
-      let setupErrorMessage: string | undefined;
-      try {
-        const setup = await setupCodeAssistUser(token.access_token);
-        managedProjectId = setup.projectId;
-      } catch (setupError) {
-        setupErrorMessage =
-          setupError instanceof Error ? setupError.message : String(setupError);
-        console.error("Code Assist onboarding failed", setupError);
-      }
-
-      await this.onSubmit({
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
-        expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
-        email: token.email,
-        managedProjectId,
-      });
-
-      if (setupErrorMessage) {
-        // OAuth token is valid and stored — but Code Assist project onboarding
-        // failed, so any :generateContent call will 404 until this clears. Tell
-        // the user up front instead of letting them hit the opaque 404 later.
-        new Notice(
-          `Gemini Plan 로그인은 성공했지만 Code Assist 프로젝트 설정에 실패했습니다: ${setupErrorMessage}`,
-          12000,
-        );
-        this.setError(`Code Assist setup failed: ${setupErrorMessage}`);
-      } else {
-        new Notice("Gemini Plan connected");
-        this.close();
-      }
-    } catch (error) {
-      this.setStatus("");
-      this.setError("Automatic connect failed. Paste the full redirect URL below and try again.");
-      console.error(error);
-    }
-  }
-
-  private async finishWithRedirectUrl(): Promise<void> {
-    this.setError("");
-    const ready = await this.ensureFlow();
-    if (!ready) return;
-    const creds = this.getCredentials();
-
-    const code = parseOAuthParam(this.redirectValue, "code");
-    const state = parseOAuthParam(this.redirectValue, "state");
-    if (!code || !state) {
-      this.setError("Paste the full redirect URL from your browser address bar.");
-      return;
-    }
-    if (state !== this.state) {
-      this.setError("OAuth state mismatch. Start login again and use the newest redirect URL.");
-      return;
-    }
-
-    try {
-      const token = await exchangeGeminiPlanCode({
-        code,
-        pkceVerifier: this.pkceVerifier,
-        clientId: creds.clientId,
-        clientSecret: creds.clientSecret,
-      });
-
-      let managedProjectId: string | undefined;
-      let setupErrorMessage: string | undefined;
-      try {
-        const setup = await setupCodeAssistUser(token.access_token);
-        managedProjectId = setup.projectId;
-      } catch (setupError) {
-        setupErrorMessage =
-          setupError instanceof Error ? setupError.message : String(setupError);
-        console.error("Code Assist onboarding failed", setupError);
-      }
-
-      await this.onSubmit({
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
-        expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
-        email: token.email,
-        managedProjectId,
-      });
-
-      if (setupErrorMessage) {
-        // OAuth token is valid and stored — but Code Assist project onboarding
-        // failed, so any :generateContent call will 404 until this clears. Tell
-        // the user up front instead of letting them hit the opaque 404 later.
-        new Notice(
-          `Gemini Plan 로그인은 성공했지만 Code Assist 프로젝트 설정에 실패했습니다: ${setupErrorMessage}`,
-          12000,
-        );
-        this.setError(`Code Assist setup failed: ${setupErrorMessage}`);
-      } else {
-        new Notice("Gemini Plan connected");
-        this.close();
-      }
-    } catch (error) {
-      this.setError("Manual connect failed. Start login again and paste the newest redirect URL.");
-      console.error(error);
-    }
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
 
-class AnthropicPlanConnectionModal extends PlanConnectionModal {
-  private code = "";
-  private pkceVerifier = "";
-  private state = "";
-  private authorizeUrl = "";
-  private riskAcknowledged = false;
+const RUNTIME_INSTALL_GUIDES: Record<NativeRuntimeProvider, string> = {
+  claude: "https://code.claude.com/docs/en/installation",
+  gemini: "https://antigravity.google/docs/cli/install",
+};
 
-  onOpen(): void {
-    this.titleEl.setText("Connect Claude Plan");
-    this.contentEl.empty();
+type SettingsHeadingLevel = "section" | "card" | "sub";
 
-    this.contentEl.createEl("p", {
-      text: "Anthropic still requires a browser login and code exchange. This is no longer a token-paste modal, but it still needs the authorization code from the redirected browser URL.",
-    });
+/**
+ * Settings headings go through Setting().setHeading(), which the Obsidian
+ * community review requires instead of raw heading elements.
+ */
+function addSettingsHeading(containerEl: HTMLElement, text: string, level: SettingsHeadingLevel = "section"): Setting {
+  return new Setting(containerEl)
+    .setName(text)
+    .setHeading()
+    .setClass("np-settings-heading")
+    .setClass(`np-settings-heading--${level}`);
+}
 
-    const warning = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    warning.createEl("strong", { text: "Warning" });
-    warning.createEl("p", {
-      text: getProviderDefinition("anthropic-plan").warning || "",
-    });
-
-    this.statusEl = this.contentEl.createDiv({ cls: "notepack-settings-note" });
-    this.errorEl = this.contentEl.createDiv({ cls: "notepack-settings-warning" });
-    this.errorEl.style.display = "none";
-
-    new Setting(this.contentEl)
-      .setName("I understand the risk")
-      .setDesc("You must acknowledge this warning before connecting Claude Plan.")
-      .addToggle((toggle) => {
-        toggle.setValue(this.riskAcknowledged).onChange((value) => {
-          this.riskAcknowledged = value;
-        });
-      });
-
-    new Setting(this.contentEl)
-      .setName("Claude login")
-      .setDesc("Open the Claude browser login first.")
-      .addButton((button) => {
-        button.setButtonText("Login to Claude").setCta().onClick(() => {
-          void this.openClaudeLogin();
-        });
-      });
-
-    new Setting(this.contentEl)
-      .setName("Authorization code")
-      .setDesc("Paste the code from the redirected Claude URL.")
-      .addText((text) => {
-        text.setPlaceholder("Paste authorization code").onChange((value) => {
-          this.code = value;
-          this.setError("");
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText("Connect").setCta().onClick(() => {
-          void this.finishConnect();
-        });
-      });
-
-    this.createFooter();
-  }
-
-  private async ensureFlow(): Promise<void> {
-    if (this.authorizeUrl && this.pkceVerifier && this.state) return;
-    const pkce = await createPkcePair();
-    const state = createOAuthState();
-    this.pkceVerifier = pkce.verifier;
-    this.state = state;
-    this.authorizeUrl = buildAnthropicPlanAuthorizeUrl({ pkce, state });
-  }
-
-  private async openClaudeLogin(): Promise<void> {
-    this.setError("");
-    this.setStatus("Preparing Claude login...");
-    try {
-      await this.ensureFlow();
-      window.open(this.authorizeUrl, "_blank");
-      this.setStatus("Complete the Claude login, then paste the returned authorization code.");
-    } catch (error) {
-      this.setStatus("");
-      this.setError("Failed to initialize the Claude login flow.");
-      console.error(error);
-    }
-  }
-
-  private async finishConnect(): Promise<void> {
-    this.setError("");
-    if (!this.riskAcknowledged) {
-      this.setError("Acknowledge the warning before connecting Claude Plan.");
-      return;
-    }
-    if (!this.code.trim()) {
-      this.setError("Paste the authorization code from the redirected Claude URL.");
-      return;
-    }
-
-    await this.ensureFlow();
-
-    try {
-      const token = await exchangeAnthropicPlanCode({
-        code: this.code.trim(),
-        state: this.state,
-        pkceVerifier: this.pkceVerifier,
-      });
-
-      await this.onSubmit({
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
-        expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
-      });
-
-      new Notice("Claude Plan connected");
-      this.close();
-    } catch (error) {
-      this.setError("Claude OAuth failed. Double-check the code and try again.");
-      console.error(error);
-    }
+function runtimeStatusLabel(snapshot: NativeRuntimeSnapshot): string {
+  switch (snapshot.status) {
+    case "checking":
+      return t("settingsRuntimeStatusChecking");
+    case "not-installed":
+      return t("settingsRuntimeStatusNotInstalled");
+    case "login-required":
+      return t("settingsRuntimeStatusLoginRequired");
+    case "blocked":
+      return t("settingsRuntimeStatusBlocked");
+    case "ready":
+      return t("settingsRuntimeStatusReady");
+    case "error":
+      return t("settingsRuntimeStatusError");
+    default:
+      return t("settingsRuntimeStatusUnknown");
   }
 }
 
 type SettingsTabId = "setup" | "persona" | "card-difficulty" | "general";
 
+/** Paints one settings section into a container. */
+type SectionPainter = (containerEl: HTMLElement, settings: AISettings) => void;
+
+/**
+ * A section painted into one row of Obsidian's declarative settings (1.13+).
+ * Runtime status subscriptions made while painting belong to the mount.
+ */
+interface SectionMount {
+  el: HTMLElement;
+  paint: SectionPainter;
+  subscriptions: Array<() => void>;
+}
+
+// Extra terms for Obsidian's settings search, in both interface languages.
+const SECTION_ALIASES = {
+  overview: ["model", "모델", "status", "상태"],
+  plan: [
+    "Claude", "Claude Code", "Gemini", "Antigravity", "ChatGPT", "Codex", "OpenAI",
+    "plan", "구독", "login", "로그인", "Team", "Enterprise",
+  ],
+  providers: [
+    "API key", "API 키", "Anthropic", "OpenAI", "Gemini", "OpenRouter", "xAI", "Grok", "DeepSeek",
+    "provider", "프로바이더", "model", "모델",
+  ],
+  webGrounding: ["web search", "웹 검색", "grounding"],
+  agents: ["persona", "페르소나", "agent", "에이전트", "annotation", "주석", "language", "언어"],
+  generation: ["sentences", "문장", "exploration", "pity"],
+  difficulty: ["difficulty", "난이도", "prompt", "프롬프트", "preset", "프리셋"],
+  folders: ["folder", "폴더", "author", "작성자", "workbench", "워크벤치"],
+  interface: ["language", "언어", "Korean", "English", "한국어"],
+  migration: ["migration", "마이그레이션", "legacy"],
+};
+
 export class NotePackSettingTab extends PluginSettingTab {
   private readonly plugin: NotePackPlugin;
   private activeTab: SettingsTabId = "setup";
   private activePersonaTab = 0;
+  private visible = false;
+  // Page names and group headings still show the previous language.
+  private labelsStale = false;
+  private readonly mounts = new Set<SectionMount>();
+  private readonly tabSubscriptions: Array<() => void> = [];
+  // Receives the status subscriptions of the section being painted.
+  private subscriptionTarget: Array<() => void> = [];
 
   constructor(app: App, plugin: NotePackPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
 
+  /**
+   * Obsidian 1.13+ renders these definitions instead of calling display().
+   * The four tabs become pages, and each section paints into one row, so the
+   * sections show up in Obsidian's settings search.
+   */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        type: "group",
+        heading: t("settingsAiRuntime"),
+        items: [
+          this.sectionRow(t("settingsActiveModel"), SECTION_ALIASES.overview, (el, settings) =>
+            this.renderOverview(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabSetup"),
+        items: [
+          this.sectionGroup(t("settingsPlanConnections"), SECTION_ALIASES.plan, (el, settings) =>
+            this.renderPlanSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsApiKeyProviders"), SECTION_ALIASES.providers, (el, settings) =>
+            this.renderProviderSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsWebGroundingHeading"), SECTION_ALIASES.webGrounding, (el, settings) =>
+            this.renderWebGroundingSection(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabPersona"),
+        items: [
+          this.sectionGroup(t("settingsAnnotationAgentsHeading"), SECTION_ALIASES.agents, (el, settings) =>
+            this.renderAnnotationSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsGenerationBehaviorHeading"), SECTION_ALIASES.generation, (el, settings) =>
+            this.renderPersonaTuningSection(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabCardDifficulty"),
+        items: [
+          this.sectionGroup(t("settingsCardDifficultyHeading"), SECTION_ALIASES.difficulty, (el, settings) =>
+            this.renderCardDifficultyTab(el, settings, false),
+          ),
+        ],
+      },
+      {
+        type: "page",
+        name: t("settingsTabGeneral"),
+        items: [
+          this.sectionGroup(t("settingsVaultFoldersHeading"), SECTION_ALIASES.folders, (el, settings) =>
+            this.renderVaultPathSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsInterfaceHeading"), SECTION_ALIASES.interface, (el, settings) =>
+            this.renderUiLanguageSection(el, settings, false),
+          ),
+          this.sectionGroup(t("settingsLegacyMigrationHeading"), SECTION_ALIASES.migration, (el, settings) =>
+            this.renderMaintenanceSection(el, settings, false),
+          ),
+        ],
+      },
+    ];
+  }
+
+  /** Obsidian before 1.13 calls display() and gets the tabbed page. */
   display(): void {
+    this.renderTabs();
+  }
+
+  hide(): void {
+    // Labels come from getSettingDefinitions(). Reload them while the tab
+    // closes: update() empties a page that is still open.
+    if (requireApiVersion("1.13.0") && this.labelsStale) {
+      this.labelsStale = false;
+      this.update();
+    }
+    this.visible = false;
+    this.releaseSubscriptions(this.tabSubscriptions);
+    for (const mount of Array.from(this.mounts)) this.unmount(mount);
+    super.hide();
+  }
+
+  private renderTabs(): void {
     const { containerEl } = this;
     const settings = this.plugin.settingsStore.settings;
+    this.releaseSubscriptions(this.tabSubscriptions);
+    this.visible = true;
 
     containerEl.empty();
     containerEl.addClass("notepack-settings");
 
-    this.renderTabBar(containerEl);
-    const panel = containerEl.createDiv({ cls: "notepack-settings-tabpanel" });
+    this.collectSubscriptions(this.tabSubscriptions, () => {
+      this.renderTabBar(containerEl);
+      const panel = containerEl.createDiv({ cls: "notepack-settings-tabpanel" });
 
-    if (this.activeTab === "setup") {
-      this.renderOverview(panel, settings);
-      this.renderPlanSection(panel, settings);
-      this.renderProviderSection(panel, settings);
-      this.renderWebGroundingSection(panel, settings);
-    } else if (this.activeTab === "persona") {
-      this.renderAnnotationSection(panel, settings);
-      this.renderPersonaTuningSection(panel, settings);
-    } else if (this.activeTab === "card-difficulty") {
-      this.renderCardDifficultyTab(panel, settings);
-    } else {
-      this.renderVaultPathSection(panel, settings);
-      this.renderUiLanguageSection(panel, settings);
-      this.renderMaintenanceSection(panel, settings);
+      if (this.activeTab === "setup") {
+        this.renderOverview(panel, settings);
+        this.renderPlanSection(panel, settings);
+        this.renderProviderSection(panel, settings);
+        this.renderWebGroundingSection(panel, settings);
+      } else if (this.activeTab === "persona") {
+        this.renderAnnotationSection(panel, settings);
+        this.renderPersonaTuningSection(panel, settings);
+      } else if (this.activeTab === "card-difficulty") {
+        this.renderCardDifficultyTab(panel, settings);
+      } else {
+        this.renderVaultPathSection(panel, settings);
+        this.renderUiLanguageSection(panel, settings);
+        this.renderMaintenanceSection(panel, settings);
+      }
+    });
+  }
+
+  private sectionGroup(heading: string, aliases: string[], paint: SectionPainter): SettingDefinitionGroup {
+    return { type: "group", heading, items: [this.sectionRow(heading, aliases, paint)] };
+  }
+
+  private sectionRow(name: string, aliases: string[], paint: SectionPainter): SettingDefinitionRender {
+    return {
+      name,
+      aliases,
+      render: (setting) => {
+        this.visible = true;
+        setting.settingEl.addClass("np-settings-host");
+        // Obsidian can render the same row again; drop what an earlier pass left.
+        setting.settingEl.querySelectorAll(":scope > .np-settings-host-body").forEach((el) => el.remove());
+        const mount: SectionMount = {
+          el: setting.settingEl.createDiv({ cls: "notepack-settings np-settings-host-body" }),
+          paint,
+          subscriptions: [],
+        };
+        this.mounts.add(mount);
+        this.paintMount(mount);
+        return () => this.unmount(mount);
+      },
+    };
+  }
+
+  private paintMount(mount: SectionMount): void {
+    this.releaseSubscriptions(mount.subscriptions);
+    mount.el.empty();
+    this.collectSubscriptions(mount.subscriptions, () => {
+      mount.paint(mount.el, this.plugin.settingsStore.settings);
+    });
+  }
+
+  private unmount(mount: SectionMount): void {
+    this.releaseSubscriptions(mount.subscriptions);
+    this.mounts.delete(mount);
+    mount.el.remove();
+  }
+
+  private collectSubscriptions(target: Array<() => void>, paint: () => void): void {
+    const previous = this.subscriptionTarget;
+    this.subscriptionTarget = target;
+    try {
+      paint();
+    } finally {
+      this.subscriptionTarget = previous;
+    }
+  }
+
+  private releaseSubscriptions(subscriptions: Array<() => void>): void {
+    subscriptions.splice(0).forEach((unsubscribe) => unsubscribe());
+  }
+
+  /** Repaints after a change, in whichever form Obsidian rendered the tab. */
+  private refresh(): void {
+    // A background check can finish after the tab closed.
+    if (!this.visible) return;
+    // Before 1.13 Obsidian calls display(); from 1.13 it renders the definitions.
+    if (!requireApiVersion("1.13.0")) {
+      this.renderTabs();
+      return;
+    }
+    for (const mount of Array.from(this.mounts)) {
+      if (mount.el.isConnected) this.paintMount(mount);
+      else this.unmount(mount);
     }
   }
 
@@ -1213,7 +1214,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       button.addEventListener("click", () => {
         if (this.activeTab === tab.id) return;
         this.activeTab = tab.id;
-        this.display();
+        this.refresh();
       });
     });
 
@@ -1241,9 +1242,18 @@ export class NotePackSettingTab extends PluginSettingTab {
   }
 
   private saveSettings(nextSettings: AISettings): void {
+    if (nextSettings.uiLanguage !== this.plugin.settingsStore.settings.uiLanguage) this.labelsStale = true;
     setLanguage(nextSettings.uiLanguage);
     this.plugin.settingsStore.updateSettings(nextSettings);
-    this.display();
+    this.refresh();
+  }
+
+  /**
+   * Saves without repainting, for text the user is still typing: a repaint
+   * replaces the input and drops the focus after every keystroke.
+   */
+  private saveSettingsQuietly(nextSettings: AISettings): void {
+    this.plugin.settingsStore.updateSettings(nextSettings);
   }
 
   private persistProviderWithModels(provider: AIProviderRecord, stagedModels: AIChatModel[]): void {
@@ -1268,8 +1278,8 @@ export class NotePackSettingTab extends PluginSettingTab {
     this.saveSettings(next);
   }
 
-  private renderOverview(containerEl: HTMLElement, settings: AISettings): void {
-    new Setting(containerEl).setName(t("settingsAiRuntime")).setHeading();
+  private renderOverview(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
+    if (withHeading) new Setting(containerEl).setName(t("settingsAiRuntime")).setHeading();
 
     const executionState = getActiveModelExecutionState(settings);
     const resolved = resolveActiveChatModel(settings);
@@ -1304,9 +1314,9 @@ export class NotePackSettingTab extends PluginSettingTab {
     });
   }
 
-  private renderPlanSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderPlanSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsPlanConnections") });
+    if (withHeading) addSettingsHeading(section, t("settingsPlanConnections"));
     section.createEl("p", {
       text: Platform.isDesktop
         ? t("settingsPlanConnectionsDesktopDesc")
@@ -1315,14 +1325,14 @@ export class NotePackSettingTab extends PluginSettingTab {
 
     const grid = section.createDiv({ cls: "notepack-settings-grid" });
     this.renderPlanCard(grid, settings, "openai-plan", "OpenAI", t("settingsOpenAIPlanDesc"));
-    this.renderPlanCard(grid, settings, "gemini-plan", "Gemini", t("settingsGeminiPlanDesc"));
-    this.renderPlanCard(grid, settings, "anthropic-plan", "Claude", t("settingsAnthropicPlanDesc"));
+    this.renderNativeRuntimeCard(grid, settings, "claude", "Claude", t("settingsAnthropicPlanDesc"));
+    this.renderNativeRuntimeCard(grid, settings, "gemini", "Gemini", t("settingsGeminiPlanDesc"));
   }
 
   private renderPlanCard(
     containerEl: HTMLElement,
     settings: AISettings,
-    type: Extract<AIProviderType, "openai-plan" | "gemini-plan" | "anthropic-plan">,
+    type: Extract<AIProviderType, "openai-plan">,
     title: string,
     description: string,
   ): void {
@@ -1337,7 +1347,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     const models = getModelsForProvider(settings, provider.id);
     const card = containerEl.createDiv({ cls: "notepack-settings-card" });
 
-    card.createEl("h4", { text: title });
+    addSettingsHeading(card, title, "card");
     card.createEl("p", { text: description });
     card.createEl("p", {
       text: getPlanConnectionLabel(provider),
@@ -1349,14 +1359,6 @@ export class NotePackSettingTab extends PluginSettingTab {
         text: t("settingsPlanReconnectNotice"),
       });
       reconnectEl.addClass("notepack-settings-warning");
-    }
-
-    if (type === "anthropic-plan") {
-      const warning = getProviderDefinition(type).warning;
-      if (warning) {
-        const warningEl = card.createEl("p", { text: warning });
-        warningEl.addClass("notepack-settings-warning");
-      }
     }
 
     const actions = card.createDiv({ cls: "notepack-settings-card-actions" });
@@ -1378,17 +1380,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         );
       };
 
-      switch (type) {
-        case "openai-plan":
-          new OpenAIPlanConnectionModal(this.app, provider, saveOauth).open();
-          break;
-        case "gemini-plan":
-          new GeminiPlanConnectionModal(this.app, provider, saveOauth).open();
-          break;
-        case "anthropic-plan":
-          new AnthropicPlanConnectionModal(this.app, provider, saveOauth).open();
-          break;
-      }
+      new OpenAIPlanConnectionModal(this.app, provider, saveOauth).open();
     });
 
     const disconnectButton = actions.createEl("button", { text: t("settingsDisconnect") });
@@ -1403,9 +1395,163 @@ export class NotePackSettingTab extends PluginSettingTab {
     });
   }
 
-  private renderProviderSection(containerEl: HTMLElement, settings: AISettings): void {
+  /**
+   * Claude Plan and Gemini Plan run the official CLIs installed on this
+   * computer. The card shows the device's runtime state; nothing about it is
+   * stored in the synced vault settings.
+   */
+  private renderNativeRuntimeCard(
+    containerEl: HTMLElement,
+    settings: AISettings,
+    provider: NativeRuntimeProvider,
+    title: string,
+    description: string,
+  ): void {
+    const card = containerEl.createDiv({ cls: "notepack-settings-card" });
+    const providerId = provider === "claude" ? "anthropic-plan" : "gemini-plan";
+    const configuredModels = getModelsForProvider(settings, providerId).length;
+
+    if (!Platform.isDesktop) {
+      addSettingsHeading(card, title, "card");
+      card.createEl("p", { text: description });
+      card.createEl("p", { text: t("settingsPlanDesktopOnlyNotice"), cls: "notepack-settings-warning" });
+      return;
+    }
+
+    const runtime = getNativeRuntime();
+    // Kept outside paint: status updates repaint the card while the user types.
+    let customPath = runtime.getCustomPath(provider);
+    const paint = () => {
+      const snapshot = runtime.getSnapshot(provider);
+      card.empty();
+      addSettingsHeading(card, title, "card");
+      card.createEl("p", { text: description });
+      if (provider === "claude") {
+        card.createEl("p", { text: t("settingsRuntimeExperimental"), cls: "notepack-settings-note" });
+      }
+
+      const status = [runtimeStatusLabel(snapshot)];
+      if (snapshot.version) status.push(`${t("settingsRuntimeVersion")} ${snapshot.version}`);
+      card.createEl("p", { text: status.join(" · "), cls: "notepack-settings-card-status" });
+      card.createEl("p", { text: `${t("settingsModelsAvailable")}: ${configuredModels}` });
+      if (provider === "gemini" && snapshot.models.length > 0) {
+        card.createEl("p", { text: `${t("settingsRuntimeModelsFound")}: ${snapshot.models.map((model) => model.id).join(", ")}` });
+      }
+
+      const organizationOptIn = provider === "claude" && snapshot.decision?.code === "organization-opt-in-required";
+      if (organizationOptIn) {
+        card.createEl("p", { text: t("settingsClaudeOrgBlocked"), cls: "notepack-settings-warning" });
+      } else if (snapshot.error && snapshot.status !== "checking") {
+        card.createEl("p", { text: snapshot.error, cls: "notepack-settings-warning" });
+      }
+      if (snapshot.status === "login-required") {
+        card.createEl("p", { text: t("settingsRuntimeLoginHint"), cls: "notepack-settings-note" });
+      }
+      if (provider === "claude" && runtime.allowsClaudeOrganizationPlans()) {
+        card.createEl("p", { text: t("settingsClaudeOrgAllowed"), cls: "notepack-settings-note" });
+      }
+
+      const actions = card.createDiv({ cls: "notepack-settings-card-actions" });
+      const check = actions.createEl("button", { text: t("settingsRuntimeCheck") });
+      if (snapshot.status !== "ready") check.addClass("mod-cta");
+      check.disabled = snapshot.status === "checking";
+      check.addEventListener("click", () => {
+        void this.checkNativeRuntime(provider);
+      });
+
+      if (snapshot.status === "not-installed") {
+        actions.createEl("button", { text: t("settingsRuntimeInstallGuide") }).addEventListener("click", () => {
+          window.open(RUNTIME_INSTALL_GUIDES[provider], "_blank");
+        });
+      } else if (snapshot.executablePath) {
+        actions.createEl("button", { text: t("settingsRuntimeOpenLogin") }).addEventListener("click", () => {
+          try {
+            runtime.openLoginTerminal(provider, (command) => {
+              new Notice(t("settingsRuntimeTerminalFailed").replace("{command}", command), 15000);
+            });
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : String(error));
+          }
+        });
+      }
+
+      if (organizationOptIn) {
+        const allow = actions.createEl("button", { text: t("settingsClaudeOrgAllow") });
+        allow.addClass("mod-cta");
+        allow.addEventListener("click", () => {
+          new ClaudeOrganizationConsentModal(this.app, () => {
+            runtime.setClaudeOrganizationPlans(true);
+            void this.checkNativeRuntime(provider);
+          }).open();
+        });
+      } else if (provider === "claude" && runtime.allowsClaudeOrganizationPlans()) {
+        actions.createEl("button", { text: t("settingsClaudeOrgRevoke") }).addEventListener("click", () => {
+          runtime.setClaudeOrganizationPlans(false);
+          void this.checkNativeRuntime(provider);
+        });
+      }
+
+      new Setting(card)
+        .setName(t("settingsRuntimeCustomPath"))
+        .setDesc(t("settingsRuntimeCustomPathDesc"))
+        .addText((text) => {
+          text
+            .setPlaceholder(provider === "claude" ? "claude" : "agy")
+            .setValue(customPath)
+            .onChange((value) => {
+              customPath = value;
+            });
+        })
+        .addButton((button) => {
+          button.setButtonText("Apply").onClick(() => {
+            runtime.setCustomPath(provider, customPath);
+            void this.checkNativeRuntime(provider);
+          });
+        });
+    };
+
+    paint();
+    this.subscriptionTarget.push(runtime.onChange(paint));
+    if (runtime.getSnapshot(provider).status === "unknown") {
+      void this.checkNativeRuntime(provider, { silent: true });
+    }
+  }
+
+  private async checkNativeRuntime(provider: NativeRuntimeProvider, options: { silent?: boolean } = {}): Promise<void> {
+    const snapshot = await getNativeRuntime().diagnose(provider);
+    if (provider === "gemini" && snapshot.status === "ready") {
+      this.addRuntimeGeminiModels(snapshot.models);
+    }
+    if (!options.silent) {
+      new Notice(`${provider === "claude" ? "Claude" : "Gemini"} Plan: ${runtimeStatusLabel(snapshot)}`);
+    }
+  }
+
+  // Antigravity's catalog changes over time; offer every Gemini model it lists.
+  private addRuntimeGeminiModels(models: NativeRuntimeSnapshot["models"]): void {
+    let next = this.plugin.settingsStore.settings;
+    let changed = false;
+    for (const runtimeModel of models) {
+      if (next.chatModels.some((model) => model.providerId === "gemini-plan" && model.model === runtimeModel.id)) continue;
+      next = upsertChatModel(next, {
+        id: createModelId("gemini-plan", `${runtimeModel.id}-plan`),
+        providerType: "gemini-plan",
+        providerId: "gemini-plan",
+        label: `${runtimeModel.label} (Plan)`,
+        model: runtimeModel.id,
+        supportsGrounding: false,
+        supportsJsonSchema: false,
+        supportsJsonObject: true,
+        supportsAnnotations: false,
+      });
+      changed = true;
+    }
+    if (changed) this.saveSettings(next);
+  }
+
+  private renderProviderSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsApiKeyProviders") });
+    if (withHeading) addSettingsHeading(section, t("settingsApiKeyProviders"));
     section.createEl("p", { text: t("settingsApiKeyProvidersDesc") });
 
     const toolbar = section.createDiv({ cls: "notepack-settings-toolbar" });
@@ -1441,7 +1587,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       const baseUrl = resolveProviderBaseUrl(provider);
       const card = grid.createDiv({ cls: "notepack-settings-card notepack-settings-provider-card" });
 
-      card.createEl("h4", { text: getProviderDisplayName(provider) });
+      addSettingsHeading(card, getProviderDisplayName(provider), "card");
       card.createEl("p", {
         text: getProviderConnectionSummary(provider),
         cls: "notepack-settings-card-status",
@@ -1472,19 +1618,18 @@ export class NotePackSettingTab extends PluginSettingTab {
       if (!isBuiltInProvider(provider)) {
         actions.createEl("button", { text: t("settingsDeleteBtn") }).addEventListener("click", () => {
           const linkedModels = getModelsForProvider(this.plugin.settingsStore.settings, provider.id);
-          const confirmed = window.confirm(
-            `${t("settingsConfirmDeleteProvider")}\n"${provider.id}" → ${linkedModels.length}`,
-          );
-          if (!confirmed) return;
-          this.saveSettings(removeProvider(this.plugin.settingsStore.settings, provider.id));
+          const message = `${t("settingsConfirmDeleteProvider")}\n"${provider.id}" → ${linkedModels.length}`;
+          void confirmAction(this.app, message, t("settingsDeleteBtn"), true).then((confirmed) => {
+            if (confirmed) this.saveSettings(removeProvider(this.plugin.settingsStore.settings, provider.id));
+          });
         });
       }
     });
   }
 
-  private renderAnnotationSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderAnnotationSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsAnnotationAgentsHeading") });
+    if (withHeading) addSettingsHeading(section, t("settingsAnnotationAgentsHeading"));
     section.createEl("p", { text: t("settingsAnnotationAgentsDesc") });
 
     const agents = normalizeAnnotationAgents(settings.annotationAgents, settings.activeChatModelId, {
@@ -1584,7 +1729,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       tabBtn.addEventListener("click", () => {
         if (this.activePersonaTab === index) return;
         this.activePersonaTab = index;
-        this.display();
+        this.refresh();
       });
     });
 
@@ -1617,7 +1762,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         };
         saveAgents([...current, newAgent]);
         this.activePersonaTab = current.length;
-        this.display();
+        this.refresh();
       });
     }
 
@@ -1629,7 +1774,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     const headerTitle = activeAgent.label && activeAgent.label !== `AI ${this.activePersonaTab + 1}`
       ? `${t("settingsAgentLabelPrefix")} ${this.activePersonaTab + 1}: ${activeAgent.label}`
       : `${t("settingsAgentLabelPrefix")} ${this.activePersonaTab + 1}`;
-    cardHeader.createEl("h4", { text: headerTitle });
+    addSettingsHeading(cardHeader, headerTitle, "card");
 
     if (agents.length > 1) {
       const removeBtn = cardHeader.createEl("button", {
@@ -1649,7 +1794,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         }));
         saveAgents(next);
         this.activePersonaTab = Math.min(this.activePersonaTab, next.length - 1);
-        this.display();
+        this.refresh();
       });
     }
 
@@ -1679,7 +1824,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         text.setPlaceholder(t("settingsAgentIconPlaceholder"));
         text.setValue(activeAgent.icon ?? "");
         text.inputEl.maxLength = 4;
-        text.inputEl.style.width = "5em";
+        text.inputEl.addClass("np-settings-narrow-input");
         text.onChange((value) => {
           const trimmed = value.trim();
           const clipped = trimmed ? Array.from(trimmed).slice(0, 2).join("") : undefined;
@@ -1729,7 +1874,7 @@ export class NotePackSettingTab extends PluginSettingTab {
         });
         resetBtn.addEventListener("click", () => {
           saveAgent(activeAgent.id, { color: undefined });
-          this.display();
+          this.refresh();
         });
       });
 
@@ -1764,7 +1909,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
 
     const presetsBlock = card.createDiv({ cls: "notepack-settings-persona-presets" });
-    presetsBlock.createEl("h5", { text: t("settingsPersonaPresetsHeading") });
+    addSettingsHeading(presetsBlock, t("settingsPersonaPresetsHeading"), "sub");
     presetsBlock.createEl("p", { text: t("settingsPersonaPresetsDesc"), cls: "notepack-settings-persona-presets-desc" });
     const presetGrid = presetsBlock.createDiv({ cls: "notepack-settings-persona-preset-grid" });
     PERSONA_PRESET_ENTRIES.forEach((entry) => {
@@ -1779,7 +1924,7 @@ export class NotePackSettingTab extends PluginSettingTab {
           icon: entry.defaultIcon,
           color: entry.defaultColor,
         });
-        this.display();
+        this.refresh();
       });
     });
 
@@ -1798,9 +1943,9 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderWebGroundingSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderWebGroundingSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsWebGroundingHeading") });
+    if (withHeading) addSettingsHeading(section, t("settingsWebGroundingHeading"));
 
     const resolved = resolveActiveChatModel(settings);
     const groundingSupported = Boolean(resolved?.model.supportsGrounding);
@@ -1821,9 +1966,9 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderPersonaTuningSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderPersonaTuningSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsGenerationBehaviorHeading") });
+    if (withHeading) addSettingsHeading(section, t("settingsGenerationBehaviorHeading"));
     section.createEl("p", { text: t("settingsGenerationBehaviorDesc") });
 
     new Setting(section)
@@ -1834,11 +1979,11 @@ export class NotePackSettingTab extends PluginSettingTab {
         text.inputEl.min = "1";
         text.inputEl.max = "10";
         text.inputEl.step = "1";
-        text.inputEl.style.width = "5em";
+        text.inputEl.addClass("np-settings-narrow-input");
         text.setValue(String(settings.annotationMaxSentences ?? 4));
         text.onChange((value) => {
           const parsed = Math.max(1, Math.min(10, Math.round(Number(value) || 4)));
-          this.saveSettings({
+          this.saveSettingsQuietly({
             ...this.plugin.settingsStore.settings,
             annotationMaxSentences: parsed,
           });
@@ -1872,16 +2017,16 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderVaultPathSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderVaultPathSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsVaultFoldersHeading") });
+    if (withHeading) addSettingsHeading(section, t("settingsVaultFoldersHeading"));
 
     new Setting(section)
       .setName(t("settingsPromotionFolderName"))
       .setDesc(t("settingsPromotionFolderDesc"))
       .addText((text) => {
         text.setPlaceholder("Cards").setValue(settings.promotionFolder).onChange((value) => {
-          this.saveSettings({ ...this.plugin.settingsStore.settings, promotionFolder: value.trim() || "Cards" });
+          this.saveSettingsQuietly({ ...this.plugin.settingsStore.settings, promotionFolder: value.trim() || "Cards" });
         });
       });
 
@@ -1893,7 +2038,7 @@ export class NotePackSettingTab extends PluginSettingTab {
           .setPlaceholder(this.app.vault.getName())
           .setValue(settings.noteAuthor ?? "")
           .onChange((value) => {
-            this.saveSettings({ ...this.plugin.settingsStore.settings, noteAuthor: value });
+            this.saveSettingsQuietly({ ...this.plugin.settingsStore.settings, noteAuthor: value });
           });
       });
 
@@ -1910,37 +2055,34 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderCardDifficultyTab(containerEl: HTMLElement, settings: AISettings): void {
+  private renderCardDifficultyTab(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const header = containerEl.createDiv({ cls: "notepack-settings-section" });
-    header.createEl("h3", { text: t("settingsCardDifficultyHeading") });
+    if (withHeading) addSettingsHeading(header, t("settingsCardDifficultyHeading"));
     header.createEl("p", {
       cls: "notepack-settings-difficulty-isolation",
       text: t("settingsCardDifficultyIsolationNote"),
     });
 
+    const controls = containerEl.createDiv();
+    renderPackPreferences(controls, normalizePackPreferences(settings.packPreferences, settings), value => {
+      this.saveSettingsQuietly({ ...this.plugin.settingsStore.settings, packPreferences: value });
+    });
+    const custom = containerEl.createEl("details");
+    custom.createEl("summary", { text: "사용자 난도 프롬프트 편집" });
+
+    // Synthesis difficulty UI removed in v3.0.3 — pack draw difficulty applies
+    // to all card-draw scenarios (single or multi-card). The synthesis backend
+    // (generateSynthesis) still exists and falls back to the built-in easy
+    // preset when no custom prompt is stored.
     this.renderDifficultyPromptSection(
-      containerEl,
-      t("settingsPackDifficultySection"),
+      custom,
+      "",
       PACK_DIFFICULTY_PRESETS,
       settings.customPackDifficultyPrompt ?? "",
-      (value) => {
-        this.saveSettings({
-          ...this.plugin.settingsStore.settings,
-          customPackDifficultyPrompt: value,
-        });
-      },
-    );
-
-    this.renderDifficultyPromptSection(
-      containerEl,
-      t("settingsSynthesisDifficultySection"),
-      SYNTHESIS_DIFFICULTY_PRESETS,
-      settings.customSynthesisPrompt ?? "",
-      (value) => {
-        this.saveSettings({
-          ...this.plugin.settingsStore.settings,
-          customSynthesisPrompt: value,
-        });
+      (value, repaint) => {
+        const next = { ...this.plugin.settingsStore.settings, customPackDifficultyPrompt: value };
+        if (repaint) this.saveSettings(next);
+        else this.saveSettingsQuietly(next);
       },
     );
   }
@@ -1950,13 +2092,13 @@ export class NotePackSettingTab extends PluginSettingTab {
     sectionTitle: string,
     presets: DifficultyPresetEntry[],
     currentValue: string,
-    onSave: (value: string) => void,
+    onSave: (value: string, repaint: boolean) => void,
   ): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section notepack-settings-difficulty-section" });
-    section.createEl("h4", { text: sectionTitle });
+    if (sectionTitle) addSettingsHeading(section, sectionTitle, "card");
 
     const presetsBlock = section.createDiv({ cls: "notepack-settings-persona-presets" });
-    presetsBlock.createEl("h5", { text: t("settingsDifficultyPresetsLabel") });
+    addSettingsHeading(presetsBlock, t("settingsDifficultyPresetsLabel"), "sub");
     presetsBlock.createEl("p", {
       text: t("settingsDifficultyPresetHint"),
       cls: "notepack-settings-persona-presets-desc",
@@ -1971,35 +2113,43 @@ export class NotePackSettingTab extends PluginSettingTab {
         button.addClass("notepack-settings-persona-preset-button--active");
       }
       button.addEventListener("click", () => {
-        onSave(entry.body);
+        onSave(entry.body, true);
       });
     });
 
-    new Setting(section)
-      .setName(t("settingsDifficultyCustomLabel"))
-      .setDesc(t("settingsDifficultyCustomDesc"))
-      .addTextArea((text) => {
-        text
-          .setPlaceholder(presets[0]?.body ?? "")
-          .setValue(currentValue)
-          .onChange((value) => {
-            onSave(value);
-          });
-        text.inputEl.addClass("notepack-settings-persona-custom-instruction");
-        text.inputEl.rows = 16;
-      });
+    // Custom prompt textarea — stacked layout (label on top, textarea full-width
+    // below) so the editor isn't crammed into Obsidian's narrow right column.
+    const customBlock = section.createDiv({ cls: "notepack-settings-difficulty-custom" });
+    customBlock.createDiv({
+      text: t("settingsDifficultyCustomLabel"),
+      cls: "notepack-settings-difficulty-custom-label",
+    });
+    customBlock.createDiv({
+      text: t("settingsDifficultyCustomDesc"),
+      cls: "notepack-settings-difficulty-custom-desc",
+    });
+    const textarea = customBlock.createEl("textarea", {
+      cls: "notepack-settings-persona-custom-instruction",
+    });
+    textarea.placeholder = presets[0]?.body ?? "";
+    textarea.value = currentValue;
+    textarea.rows = 16;
+    textarea.addEventListener("input", () => {
+      onSave(textarea.value, false);
+    });
 
     new Setting(section)
       .addButton((button) => {
         button.setButtonText(t("settingsDifficultyReset")).onClick(() => {
-          onSave("");
+          textarea.value = "";
+          onSave("", true);
         });
       });
   }
 
-  private renderUiLanguageSection(containerEl: HTMLElement, settings: AISettings): void {
+  private renderUiLanguageSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsInterfaceHeading") });
+    if (withHeading) addSettingsHeading(section, t("settingsInterfaceHeading"));
 
     new Setting(section)
       .setName(t("settingsInterfaceLanguageName"))
@@ -2013,9 +2163,9 @@ export class NotePackSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderMaintenanceSection(containerEl: HTMLElement, _settings: AISettings): void {
+  private renderMaintenanceSection(containerEl: HTMLElement, _settings: AISettings, withHeading = true): void {
     const section = containerEl.createDiv({ cls: "notepack-settings-section" });
-    section.createEl("h3", { text: t("settingsLegacyMigrationHeading") });
+    if (withHeading) addSettingsHeading(section, t("settingsLegacyMigrationHeading"));
 
     const migration = this.plugin.settingsStore.getData().legacyMigration;
     new Setting(section)
@@ -2027,7 +2177,7 @@ export class NotePackSettingTab extends PluginSettingTab {
       )
       .addButton((button) => {
         button.setButtonText(t("settingsRunMigration")).onClick(() => {
-          this.plugin.migrateLegacyProjects();
+          void this.plugin.migrateLegacyProjects();
         });
       });
   }

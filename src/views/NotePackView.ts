@@ -36,10 +36,10 @@ export class NotePackView extends ItemView {
 
     const actions = panel.createDiv({ cls: "np-home-actions" });
     actions.createEl("button", { text: "Create new workbench" }).addEventListener("click", () => {
-      this.plugin.createNewWorkbench();
+      void this.plugin.createNewWorkbench();
     });
     actions.createEl("button", { text: "Open last workbench" }).addEventListener("click", () => {
-      this.plugin.openLastWorkbench();
+      void this.plugin.openLastWorkbench();
     });
   }
 }

@@ -3,6 +3,7 @@ import type {
   OutputLanguageMode,
   SupportedOutputLanguage,
 } from "../types";
+import { replaceRetiredModelId } from "./model-retirement.ts";
 
 export const MAX_ANNOTATION_AGENTS = 10;
 
@@ -96,7 +97,8 @@ export function normalizeAnnotationAgents(
       label,
       icon: normalizeIcon(agent.icon),
       color: normalizeColor(agent.color),
-      modelId: agent.modelId || fallbackModelId,
+      // Agents stored in .codex files can still name a retired built-in model.
+      modelId: agent.modelId ? replaceRetiredModelId(agent.modelId) : fallbackModelId,
       customInstruction: agent.customInstruction?.trim() || undefined,
       order: Number.isFinite(agent.order) ? agent.order : index + 1,
       outputLanguageMode,

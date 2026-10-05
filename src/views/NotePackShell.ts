@@ -18,6 +18,7 @@ import { t } from "../i18n";
 import type { WorkbenchDocumentStore, WorkbenchStoreEvent } from "../stores/WorkbenchDocumentStore";
 import type { PackCard, ViewMode, WorkbenchCard } from "../types";
 import { VaultService } from "../services/vault-service";
+import { confirmAction } from "../components/ConfirmModal";
 import { BoardView } from "./BoardView";
 import { GraphView } from "./GraphView";
 import { KanbanView } from "./KanbanView";
@@ -62,9 +63,9 @@ export class NotePackShell {
 
   private readonly enrichControllers = new Map<string, AbortController>();
   private synthesisController: AbortController | null = null;
-  private synthesisDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private synthesisDebounceTimer: number | null = null;
   private synthesisInflight = false;
-  private viewRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private viewRefreshTimer: number | null = null;
   private viewRefreshLastAt = 0;
 
   constructor(options: NotePackShellOptions) {
@@ -108,7 +109,9 @@ export class NotePackShell {
     });
     this.updateOfflineToggle();
 
-    this.composer = new Composer(this.container, (text) => this.handleCapture(text), {
+    this.composer = new Composer(this.container, (text) => {
+      void this.handleCapture(text);
+    }, {
       app: this.app,
       initialHeight: this.store.localSettings.composerHeight,
       onHeightChange: (height) => {
@@ -150,7 +153,7 @@ export class NotePackShell {
     });
     this.listen("view-changed", () => {
       if (!this.mainEl) return;
-      const activeContainer = this.mainEl.querySelector(".np-view-container") as HTMLElement | null;
+      const activeContainer = this.mainEl.querySelector<HTMLElement>(".np-view-container");
       if (activeContainer) this.renderActiveView(activeContainer);
       if (this.viewSwitcherEl) this.renderViewSwitcher(this.viewSwitcherEl);
     });
@@ -199,8 +202,7 @@ export class NotePackShell {
       event.stopPropagation();
       this.isResizingInspector = true;
       handle.addClass("np-inspector-resize-handle--active");
-      document.body.style.cursor = "ew-resize";
-      document.body.style.userSelect = "none";
+      document.body.addClass("np-is-resizing-horizontal");
 
       const startX = event.clientX;
       const startWidth = container.getBoundingClientRect().width;
@@ -216,8 +218,7 @@ export class NotePackShell {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
         handle.removeClass("np-inspector-resize-handle--active");
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
+        document.body.removeClass("np-is-resizing-horizontal");
         const finalWidth = parseInt(
           getComputedStyle(container).getPropertyValue("--np-inspector-width"),
           10,
@@ -324,7 +325,9 @@ export class NotePackShell {
       case "board":
       default:
         this.currentView = new BoardView(container, this.store, onClick, onDoubleClick, this.app, {
-          onBulkAnnotate: () => this.bulkAnnotateSelected(),
+          onBulkAnnotate: () => {
+            void this.bulkAnnotateSelected();
+          },
           onMultiSeedPack: () => this.openPackModalForCards(this.store.selectedCards),
         });
         break;
@@ -341,7 +344,7 @@ export class NotePackShell {
       return;
     }
     const confirmMsg = t("bulkAnnotateConfirm").replace("{n}", String(cards.length));
-    if (!window.confirm(confirmMsg)) return;
+    if (!(await confirmAction(this.app, confirmMsg, t("bulkAnnotate")))) return;
     const { succeeded, failedIds } = await this.runBulkAnnotateQueue(cards.map((c) => c.id), 3);
     const doneMsg = t("bulkAnnotateDone")
       .replace("{done}", String(succeeded))
@@ -386,7 +389,7 @@ export class NotePackShell {
 
     this.store.selectCard(card.id);
     if (!offline) {
-      this.enrichCardBackground(card.id);
+      void this.enrichCardBackground(card.id);
     }
     this.checkSynthesisTrigger();
   }
@@ -486,8 +489,8 @@ export class NotePackShell {
   }
 
   private checkSynthesisTrigger(): void {
-    if (this.synthesisDebounceTimer) clearTimeout(this.synthesisDebounceTimer);
-    this.synthesisDebounceTimer = setTimeout(() => {
+    if (this.synthesisDebounceTimer) window.clearTimeout(this.synthesisDebounceTimer);
+    this.synthesisDebounceTimer = window.setTimeout(() => {
       this.synthesisDebounceTimer = null;
       void this.runSynthesisIfDue();
     }, 500);
@@ -524,6 +527,7 @@ export class NotePackShell {
         this.getRuntimeSettings(),
         this.store.enrichedCards,
         document.lastGhostTexts || [],
+        controller.signal,
       );
 
       if (controller.signal.aborted) {
@@ -586,7 +590,9 @@ export class NotePackShell {
   private buildInspectorActions(): InspectorActions {
     return {
       onDrawPack: (cardId) => this.openPackModal(cardId),
-      onPromote: (cardId) => this.promoteCard(cardId),
+      onPromote: (cardId) => {
+        void this.promoteCard(cardId);
+      },
       onArchive: (cardId) => {
         this.store.updateCard(cardId, { isArchived: true });
         this.store.selectCard(null);
@@ -608,11 +614,11 @@ export class NotePackShell {
       },
       onReEnrich: (cardId) => {
         this.store.updateCard(cardId, { status: "enriching", statusText: "" });
-        this.enrichCardBackground(cardId);
+        void this.enrichCardBackground(cardId);
       },
       onEdit: (cardId, newText) => {
         this.store.updateCard(cardId, { text: newText, status: "enriching", statusText: "" });
-        this.enrichCardBackground(cardId);
+        void this.enrichCardBackground(cardId);
       },
       onTogglePopout: (cardId) => {
         void this.openCardPopout(cardId);
@@ -702,6 +708,7 @@ export class NotePackShell {
     const modal = new PackModal(this.app, this.store, runtime, cards, (packCard: PackCard) => {
       this.store.addCard(packCard.main_question, "growth", {
         title: packCard.card_name,
+        packCard: structuredClone(packCard),
         contentType: "question",
         category: packCard.card_name,
         annotation: packCard.hook,
@@ -712,7 +719,7 @@ export class NotePackShell {
         questionType: packCard.questionType,
         lens: packCard.lens,
       });
-    });
+    }, packPreferences => this.plugin.settingsStore.updateSettings({ ...this.plugin.settingsStore.settings, packPreferences }));
 
     modal.open();
   }
@@ -745,7 +752,7 @@ export class NotePackShell {
       this.doRefreshView();
       return;
     }
-    this.viewRefreshTimer = setTimeout(() => {
+    this.viewRefreshTimer = window.setTimeout(() => {
       this.viewRefreshTimer = null;
       this.viewRefreshLastAt = Date.now();
       this.doRefreshView();
@@ -767,11 +774,11 @@ export class NotePackShell {
     this.storeListeners.length = 0;
     this.plugin.settingsStore.offChange(this.globalSettingsListener);
     if (this.synthesisDebounceTimer) {
-      clearTimeout(this.synthesisDebounceTimer);
+      window.clearTimeout(this.synthesisDebounceTimer);
       this.synthesisDebounceTimer = null;
     }
     if (this.viewRefreshTimer) {
-      clearTimeout(this.viewRefreshTimer);
+      window.clearTimeout(this.viewRefreshTimer);
       this.viewRefreshTimer = null;
     }
     this.synthesisController?.abort();

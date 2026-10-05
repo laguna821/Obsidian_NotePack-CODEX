@@ -31,7 +31,7 @@ export class CardPopoutView extends ItemView {
   private bodyEl: HTMLElement | null = null;
   private fontSize = 16;
   private lineHeight = 1.6;
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveTimer: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: NotePackPlugin) {
     super(leaf);
@@ -75,7 +75,7 @@ export class CardPopoutView extends ItemView {
 
   async onClose(): Promise<void> {
     if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
+      window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
       await this.flushSave();
     }
@@ -156,16 +156,16 @@ export class CardPopoutView extends ItemView {
   }
 
   private scheduleTextSave(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
+    if (this.saveTimer) window.clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => {
       this.saveTimer = null;
       void this.flushSave();
     }, 400);
   }
 
   private scheduleMetaSave(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
+    if (this.saveTimer) window.clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => {
       this.saveTimer = null;
       void this.flushSave();
     }, 600);

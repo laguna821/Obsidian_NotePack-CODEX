@@ -286,7 +286,7 @@ export function parseCodexDocument(raw: string, fallbackTitle = "Untitled Codex"
   }
 
   if (candidate.type && candidate.type !== CODEX_DOCUMENT_TYPE) {
-    throw new CodexDocumentParseError(`Unsupported .codex type: ${candidate.type}`);
+    throw new CodexDocumentParseError(`Unsupported .codex type: ${String(candidate.type)}`);
   }
 
   return normalizeCodexDocument(candidate);

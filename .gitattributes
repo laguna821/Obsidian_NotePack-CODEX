@@ -1,0 +1,2 @@
+# Keep text stable across Windows and the release builder; binary files stay binary.
+* text=auto eol=lf

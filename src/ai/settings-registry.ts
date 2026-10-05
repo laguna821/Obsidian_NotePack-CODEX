@@ -1,3 +1,4 @@
+import { normalizePackPreferences } from "./pack-preferences.ts";
 import type {
   AIChatModel,
   AIConfig,
@@ -10,58 +11,20 @@ import type {
   LegacyAISettings,
 } from "../types";
 import { createDefaultAnnotationAgents, normalizeAnnotationAgents } from "./personas.ts";
-
-type Mutable<T> = {
-  -readonly [K in keyof T]: T[K];
-};
-
-const OPENAI_PLAN_MODEL_ID = "openai-plan/gpt-5-5-plan";
-// Plan endpoint rejects `gpt-5.5-instant`; only the thinking variant works.
-// Auto-migrate users off legacy or broken model IDs to the working default.
-const LEGACY_OPENAI_PLAN_MODEL_IDS = new Set<string>([
-  "openai-plan/gpt-5-2-plan",
-  "openai-plan/gpt-5-4-plan",
-  "openai-plan/gpt-5-5-instant-plan",
-]);
-
-const ANTHROPIC_PLAN_MODEL_ID = "anthropic-plan/claude-sonnet-4-5-plan";
-// No active legacy Claude Plan model migrations right now. 4.6 used to be
-// quarantined here, but it is back in the catalog as an explicit choice.
-const LEGACY_ANTHROPIC_PLAN_MODEL_IDS = new Set<string>([]);
-
-// Gemini Plan = Code Assist. Code Assist has its OWN model catalog separate
-// from AI Studio; verified with a live probe (2026-05-13): only models that
-// return 200 or 429 on this endpoint are real. 404 = the model name doesn't
-// exist on Code Assist regardless of what AI Studio shows.
-const GEMINI_PLAN_FALLBACK_MODEL_ID = "gemini-plan/gemini-2-5-flash-plan";
-// IDs we shipped that turn out to be unsupported on Code Assist — remove them
-// from any persisted chatModels list and re-point annotation agents that
-// reference them onto the fallback.
-const LEGACY_GEMINI_PLAN_MODEL_IDS = new Set<string>([
-  "gemini-plan/gemini-3-1-flash-lite-plan",
-]);
-// Stored chatModels entries with these IDs may have a stale `model` field
-// (server-side identifier) baked in from earlier plugin versions; force the
-// canonical Code Assist name back onto them so the request envelope sends a
-// name Code Assist actually knows.
-const GEMINI_PLAN_MODEL_FIELD_OVERRIDES: Record<string, string> = {
-  "gemini-plan/gemini-3-flash-plan": "gemini-3-flash-preview",
-  "gemini-plan/gemini-3-pro-preview-plan": "gemini-3-pro-preview",
-};
+import { isRetiredModelId, replaceRetiredModelId } from "./model-retirement.ts";
 
 const PROVIDER_DEFINITIONS: Record<AIProviderType, AIProviderDefinition> = {
   "anthropic-plan": {
     type: "anthropic-plan",
     label: "Claude Plan",
     defaultProviderId: "anthropic-plan",
-    defaultBaseUrl: "https://api.anthropic.com/v1",
     requiresApiKey: false,
     requiresBaseUrl: false,
-    authStrategy: "oauth",
+    authStrategy: "native-runtime",
     family: "anthropic",
     mobileSupported: false,
     warning:
-      "Anthropic subscription access via third-party clients can be risky. Connect only if you understand the account risk.",
+      "Runs the Claude Code app installed on this computer with your own Claude login. NotePack never stores Claude tokens. Personal-use compatibility path, not an official Anthropic integration.",
     additionalSettings: [],
   },
   "openai-plan": {
@@ -80,35 +43,14 @@ const PROVIDER_DEFINITIONS: Record<AIProviderType, AIProviderDefinition> = {
     type: "gemini-plan",
     label: "Gemini Plan",
     defaultProviderId: "gemini-plan",
-    // Gemini Plan uses Google's internal Code Assist API (the same backend
-    // that gemini-cli talks to), NOT the public Gemini API. The OAuth token
-    // returned by the consumer-friendly login is only valid for this host.
-    defaultBaseUrl: "https://cloudcode-pa.googleapis.com/v1internal",
     requiresApiKey: false,
     requiresBaseUrl: false,
-    authStrategy: "oauth",
+    authStrategy: "native-runtime",
     family: "gemini",
     mobileSupported: false,
     warning:
-      "Gemini 구독 계정으로 Google 로그인하면 됩니다. 아래 BYO 필드는 비워두면 기본(Gemini CLI 공개 OAuth 클라이언트)으로 자동 연결되고, 본인 GCP 프로젝트 자격증명을 쓰려면 직접 입력하세요.",
-    additionalSettings: [
-      {
-        label: "BYO OAuth Client ID (고급, 선택)",
-        key: "geminiByoClientId",
-        type: "text",
-        required: false,
-        placeholder: "(비워두면 기본값 사용)",
-        description: "직접 GCP에서 발급한 OAuth 2.0 Desktop 클라이언트를 쓰고 싶을 때만 입력.",
-      },
-      {
-        label: "BYO OAuth Client Secret (고급, 선택)",
-        key: "geminiByoClientSecret",
-        type: "text",
-        required: false,
-        placeholder: "(비워두면 기본값 사용)",
-        description: "위 Client ID와 짝이 되는 secret. 둘 다 입력해야 BYO가 활성화됩니다.",
-      },
-    ],
+      "Runs the Google Antigravity CLI installed on this computer with your own Google login. NotePack never stores Google tokens.",
+    additionalSettings: [],
   },
   anthropic: {
     type: "anthropic",
@@ -327,13 +269,24 @@ function createChatModel(
   };
 }
 
+// Plan models run through the user's own subscription. Claude and Gemini Plan
+// use the installed CLI (no grounding, JSON by prompt); model IDs and aliases
+// were checked against Claude Code 2.1.285, Antigravity 1.2.14, and the OpenAI
+// Codex model docs on 2026-10-01.
+const PLAN_CLI_MODEL: Partial<AIChatModel> = {
+  supportsGrounding: false,
+  supportsJsonSchema: false,
+  supportsJsonObject: true,
+  supportsAnnotations: false,
+};
+
 export const DEFAULT_CHAT_MODELS: AIChatModel[] = [
   createChatModel(
-    "openrouter/openai-gpt-4o",
+    "openrouter/openai-gpt-6-1-sol",
     "openrouter",
     "openrouter",
-    "GPT-4o via OpenRouter",
-    "openai/gpt-4o",
+    "GPT-6.1 Sol via OpenRouter",
+    "openai/gpt-6.1-sol",
     {
       description: "Balanced default for NotePack",
       supportsGrounding: true,
@@ -342,158 +295,125 @@ export const DEFAULT_CHAT_MODELS: AIChatModel[] = [
     },
   ),
   createChatModel(
-    "openrouter/anthropic-claude-sonnet-4-5",
+    "openrouter/anthropic-claude-sonnet-5-5",
     "openrouter",
     "openrouter",
-    "Claude Sonnet 4.5 via OpenRouter",
-    "anthropic/claude-sonnet-4-5",
+    "Claude Sonnet 5.5 via OpenRouter",
+    "anthropic/claude-sonnet-5.5",
     {
       supportsJsonSchema: true,
     },
   ),
   createChatModel(
-    "openrouter/google-gemini-2.5-pro",
+    "openrouter/google-gemini-3-8-flash",
     "openrouter",
     "openrouter",
-    "Gemini 2.5 Pro via OpenRouter",
-    "google/gemini-2.5-pro",
+    "Gemini 3.8 Flash via OpenRouter",
+    "google/gemini-3.8-flash",
     {
       supportsGrounding: true,
       supportsJsonSchema: true,
       supportsAnnotations: true,
     },
   ),
-  // Claude Plan models keep extended thinking OFF by default. When thinking is
-  // enabled, Anthropic forces temperature=1; providers.ts honors that contract
-  // by omitting temperature on thinking calls, so flipping thinking on per
-  // model is safe but trades the per-call temperature for fixed-1 sampling.
-  createChatModel(
-    "anthropic-plan/claude-sonnet-4-5-plan",
-    "anthropic-plan",
-    "anthropic-plan",
-    "Claude Sonnet 4.5 (Plan)",
-    "claude-sonnet-4-5",
-    {},
-  ),
-  createChatModel(
-    "anthropic-plan/claude-sonnet-4-6-plan",
-    "anthropic-plan",
-    "anthropic-plan",
-    "Claude Sonnet 4.6 (Plan)",
-    "claude-sonnet-4-6",
-    {},
-  ),
-  createChatModel(
-    "anthropic-plan/claude-opus-4-5-plan",
-    "anthropic-plan",
-    "anthropic-plan",
-    "Claude Opus 4.5 (Plan)",
-    "claude-opus-4-5",
-    {},
-  ),
-  createChatModel(
-    "anthropic-plan/claude-haiku-4-5-plan",
-    "anthropic-plan",
-    "anthropic-plan",
-    "Claude Haiku 4.5 (Plan)",
-    "claude-haiku-4-5",
-    {},
-  ),
-  createChatModel(
-    OPENAI_PLAN_MODEL_ID,
-    "openai-plan",
-    "openai-plan",
-    "GPT-5.5 (Plan)",
-    "gpt-5.5",
-    {},
-  ),
-  createChatModel(
-    "gemini-plan/gemini-2-5-flash-plan",
-    "gemini-plan",
-    "gemini-plan",
-    "Gemini 2.5 Flash (Plan)",
-    "gemini-2.5-flash",
-    {
-      supportsGrounding: true,
-    },
-  ),
-  createChatModel(
-    "gemini-plan/gemini-2-5-pro-plan",
-    "gemini-plan",
-    "gemini-plan",
-    "Gemini 2.5 Pro (Plan)",
-    "gemini-2.5-pro",
-    {
-      supportsGrounding: true,
-    },
-  ),
-  createChatModel(
-    "gemini-plan/gemini-3-flash-plan",
-    "gemini-plan",
-    "gemini-plan",
-    "Gemini 3 Flash (Plan)",
-    "gemini-3-flash-preview",
-    {
-      supportsGrounding: true,
-    },
-  ),
-  createChatModel(
-    "gemini-plan/gemini-3-pro-preview-plan",
-    "gemini-plan",
-    "gemini-plan",
-    "Gemini 3 Pro Preview (Plan)",
-    "gemini-3-pro-preview",
-    {
-      supportsGrounding: true,
-    },
-  ),
-  createChatModel("anthropic/claude-opus-4-5", "anthropic", "anthropic", "Claude Opus 4.5", "claude-opus-4-5"),
-  createChatModel("anthropic/claude-sonnet-4-5", "anthropic", "anthropic", "Claude Sonnet 4.5", "claude-sonnet-4-5"),
+  // Claude Plan: "latest" entries follow Claude Code's aliases; pinned entries
+  // need the Claude Code release that introduced them.
+  createChatModel("anthropic-plan/claude-sonnet-latest-plan", "anthropic-plan", "anthropic-plan", "Claude Sonnet · latest (Plan)", "sonnet", {
+    ...PLAN_CLI_MODEL,
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  createChatModel("anthropic-plan/claude-opus-latest-plan", "anthropic-plan", "anthropic-plan", "Claude Opus · latest (Plan)", "opus", {
+    ...PLAN_CLI_MODEL,
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  createChatModel("anthropic-plan/claude-haiku-latest-plan", "anthropic-plan", "anthropic-plan", "Claude Haiku · latest (Plan)", "haiku", {
+    ...PLAN_CLI_MODEL,
+  }),
+  createChatModel("anthropic-plan/claude-fable-latest-plan", "anthropic-plan", "anthropic-plan", "Claude Fable · latest (Plan)", "fable", {
+    ...PLAN_CLI_MODEL,
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  createChatModel("anthropic-plan/claude-opus-5-5-plan", "anthropic-plan", "anthropic-plan", "Claude Opus 5.5 (Plan)", "claude-opus-5-5", {
+    ...PLAN_CLI_MODEL,
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  createChatModel("anthropic-plan/claude-sonnet-5-5-plan", "anthropic-plan", "anthropic-plan", "Claude Sonnet 5.5 (Plan)", "claude-sonnet-5-5", {
+    ...PLAN_CLI_MODEL,
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  createChatModel("anthropic-plan/claude-fable-5-1-plan", "anthropic-plan", "anthropic-plan", "Claude Fable 5.1 (Plan)", "claude-fable-5-1", {
+    ...PLAN_CLI_MODEL,
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  // OpenAI Plan (ChatGPT/Codex subscription over OAuth).
+  createChatModel("openai-plan/gpt-6-1-sol-plan", "openai-plan", "openai-plan", "GPT-6.1 Sol (Plan)", "gpt-6.1-sol", {
+    reasoning: { enabled: true, reasoning_effort: "medium" },
+  }),
+  createChatModel("openai-plan/gpt-6-sol-plan", "openai-plan", "openai-plan", "GPT-6 Sol (Plan)", "gpt-6-sol", {
+    reasoning: { enabled: true, reasoning_effort: "medium" },
+  }),
+  createChatModel("openai-plan/gpt-6-astra-plan", "openai-plan", "openai-plan", "GPT-6 Astra (Plan)", "gpt-6-astra", {
+    reasoning: { enabled: true, reasoning_effort: "medium" },
+  }),
+  createChatModel("openai-plan/gpt-6-luna-plan", "openai-plan", "openai-plan", "GPT-6 Luna (Plan)", "gpt-6-luna", {
+    reasoning: { enabled: true, reasoning_effort: "low" },
+  }),
+  // Verified on this OAuth path (CMDS Achmage R-001) and kept available during
+  // the GPT-6 rollout. Retired GPT-5.x selections move here, because the
+  // Codex backend may gate GPT-6 by client version for this connection.
+  createChatModel("openai-plan/gpt-5-6-sol-plan", "openai-plan", "openai-plan", "GPT-5.6 Sol (Plan)", "gpt-5.6-sol", {
+    reasoning: { enabled: true, reasoning_effort: "medium" },
+  }),
+  // Gemini Plan: Antigravity model IDs carry their effort tier in the name.
+  // Other Gemini models found while checking the connection are added on demand.
+  createChatModel("gemini-plan/gemini-3-1-pro-high-plan", "gemini-plan", "gemini-plan", "Gemini 3.1 Pro · High (Plan)", "gemini-3.1-pro-high", {
+    ...PLAN_CLI_MODEL,
+  }),
+  createChatModel("gemini-plan/gemini-3-8-flash-medium-plan", "gemini-plan", "gemini-plan", "Gemini 3.8 Flash · Medium (Plan)", "gemini-3.8-flash-medium", {
+    ...PLAN_CLI_MODEL,
+  }),
+  // Claude 4.6+ models run adaptive thinking with an effort level; Haiku 4.5
+  // keeps the older token-budget request shape.
+  createChatModel("anthropic/claude-opus-5-5", "anthropic", "anthropic", "Claude Opus 5.5", "claude-opus-5-5", {
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  createChatModel("anthropic/claude-sonnet-5-5", "anthropic", "anthropic", "Claude Sonnet 5.5", "claude-sonnet-5-5", {
+    thinking: { enabled: true, effort: "medium" },
+  }),
+  createChatModel("anthropic/claude-fable-5-1", "anthropic", "anthropic", "Claude Fable 5.1", "claude-fable-5-1", {
+    thinking: { enabled: true, effort: "medium" },
+  }),
   createChatModel("anthropic/claude-haiku-4-5", "anthropic", "anthropic", "Claude Haiku 4.5", "claude-haiku-4-5"),
-  createChatModel("openai/gpt-5.5-instant", "openai", "openai", "GPT-5.5 Instant", "gpt-5.5-instant", {
-    supportsJsonSchema: true,
-  }),
-  createChatModel("openai/gpt-5.5", "openai", "openai", "GPT-5.5", "gpt-5.5", {
-    supportsJsonSchema: true,
-  }),
-  createChatModel("openai/gpt-5", "openai", "openai", "GPT-5", "gpt-5", {
-    supportsJsonSchema: true,
-  }),
-  createChatModel("openai/gpt-5-mini", "openai", "openai", "GPT-5 Mini", "gpt-5-mini", {
-    supportsJsonSchema: true,
-  }),
-  createChatModel("openai/gpt-4o", "openai", "openai", "GPT-4o", "gpt-4o", {
-    supportsGrounding: true,
-    groundingModelId: "gpt-4o-search-preview",
-    supportsJsonSchema: true,
-    supportsAnnotations: true,
-  }),
-  createChatModel("openai/gpt-4o-mini", "openai", "openai", "GPT-4o Mini", "gpt-4o-mini", {
-    supportsGrounding: true,
-    groundingModelId: "gpt-4o-mini-search-preview",
-    supportsJsonSchema: true,
-    supportsAnnotations: true,
-  }),
-  createChatModel("openai/gpt-4.1", "openai", "openai", "GPT-4.1", "gpt-4.1", {
-    supportsJsonSchema: true,
-  }),
-  createChatModel("openai/gpt-4.1-mini", "openai", "openai", "GPT-4.1 Mini", "gpt-4.1-mini", {
-    supportsJsonSchema: true,
-  }),
-  createChatModel("openai/o4-mini", "openai", "openai", "o4-mini", "o4-mini", {
+  createChatModel("openai/gpt-6-1-sol", "openai", "openai", "GPT-6.1 Sol", "gpt-6.1-sol", {
     supportsJsonSchema: true,
     reasoning: { enabled: true, reasoning_effort: "medium" },
   }),
-  createChatModel("gemini/gemini-2.5-pro", "gemini", "gemini", "Gemini 2.5 Pro", "gemini-2.5-pro", {
-    supportsGrounding: true,
+  createChatModel("openai/gpt-6-astra", "openai", "openai", "GPT-6 Astra", "gpt-6-astra", {
+    supportsJsonSchema: true,
+    reasoning: { enabled: true, reasoning_effort: "medium" },
   }),
-  createChatModel("gemini/gemini-2.5-flash", "gemini", "gemini", "Gemini 2.5 Flash", "gemini-2.5-flash", {
-    supportsGrounding: true,
+  createChatModel("openai/gpt-6-luna", "openai", "openai", "GPT-6 Luna", "gpt-6-luna", {
+    supportsJsonSchema: true,
+    reasoning: { enabled: true, reasoning_effort: "low" },
   }),
-  createChatModel("deepseek/deepseek-chat", "deepseek", "deepseek", "DeepSeek Chat", "deepseek-chat"),
-  createChatModel("deepseek/deepseek-reasoner", "deepseek", "deepseek", "DeepSeek Reasoner", "deepseek-reasoner"),
-  createChatModel("xai/grok-4-1-fast", "xai", "xai", "Grok 4.1 Fast", "grok-4-1-fast"),
-  createChatModel("xai/grok-4-1-fast-non-reasoning", "xai", "xai", "Grok 4.1 Fast Non-Reasoning", "grok-4-1-fast-non-reasoning"),
+  createChatModel("gemini/gemini-3-8-flash", "gemini", "gemini", "Gemini 3.8 Flash", "gemini-3.8-flash", {
+    supportsGrounding: true,
+    supportsJsonSchema: true,
+  }),
+  createChatModel("gemini/gemini-3-1-pro-preview", "gemini", "gemini", "Gemini 3.1 Pro Preview", "gemini-3.1-pro-preview", {
+    supportsGrounding: true,
+    supportsJsonSchema: true,
+  }),
+  createChatModel("gemini/gemini-3-5-flash-lite", "gemini", "gemini", "Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite", {
+    supportsGrounding: true,
+    supportsJsonSchema: true,
+  }),
+  // DeepSeek retired deepseek-chat/-reasoner on 2026-07-24; xAI retired the
+  // Grok 4.1 Fast models on 2026-05-15 (checked against their docs 2026-10-01).
+  createChatModel("deepseek/deepseek-flash", "deepseek", "deepseek", "DeepSeek V4.1 Flash", "deepseek-flash"),
+  createChatModel("deepseek/deepseek-v4-pro", "deepseek", "deepseek", "DeepSeek V4 Pro", "deepseek-v4-pro"),
+  createChatModel("xai/grok-4-7", "xai", "xai", "Grok 4.7", "grok-4.7"),
+  createChatModel("xai/grok-4-3", "xai", "xai", "Grok 4.3", "grok-4.3"),
   createChatModel("mistral/mistral-large-latest", "mistral", "mistral", "Mistral Large", "mistral-large-latest"),
   createChatModel("perplexity/sonar", "perplexity", "perplexity", "Sonar", "sonar"),
   createChatModel("perplexity/sonar-deep-research", "perplexity", "perplexity", "Sonar Deep Research", "sonar-deep-research"),
@@ -511,6 +431,7 @@ export interface ResolvedAISelection {
 
 export type AIExecutionStateCode =
   | "ready"
+  | "unsupported_platform"
   | "missing_model"
   | "missing_base_url"
   | "missing_api_key"
@@ -556,53 +477,37 @@ function mergeChatModels(chatModels: AIChatModel[] = []): AIChatModel[] {
     merged.set(model.id, cloneChatModel(model));
   });
   chatModels.forEach((model) => {
+    // Built-in entries cannot be edited in the UI, so the shipped catalog
+    // always wins; otherwise a stored copy would keep stale labels and IDs.
+    if (isBuiltInChatModel(model.id) || isRetiredModelId(model.id)) return;
     merged.set(model.id, cloneChatModel(model));
   });
   return [...merged.values()];
 }
 
-function migrateLegacyPlanModels(candidate?: Partial<AISettings>): Partial<AISettings> | undefined {
+// Runs on every load (not only once per schema bump) so data written back by
+// an older NotePack on another synced device is repaired again.
+function migrateRetiredModels(candidate?: Partial<AISettings>): Partial<AISettings> | undefined {
   if (!candidate) return candidate;
 
   const migrated: Partial<AISettings> = { ...candidate };
 
   if (candidate.activeChatModelId) {
-    if (LEGACY_OPENAI_PLAN_MODEL_IDS.has(candidate.activeChatModelId)) {
-      migrated.activeChatModelId = OPENAI_PLAN_MODEL_ID;
-    } else if (LEGACY_ANTHROPIC_PLAN_MODEL_IDS.has(candidate.activeChatModelId)) {
-      migrated.activeChatModelId = ANTHROPIC_PLAN_MODEL_ID;
-    } else if (LEGACY_GEMINI_PLAN_MODEL_IDS.has(candidate.activeChatModelId)) {
-      migrated.activeChatModelId = GEMINI_PLAN_FALLBACK_MODEL_ID;
-    }
+    migrated.activeChatModelId = replaceRetiredModelId(candidate.activeChatModelId);
   }
 
   if (candidate.chatModels) {
     migrated.chatModels = candidate.chatModels
-      .filter(
-        (model) =>
-          !LEGACY_OPENAI_PLAN_MODEL_IDS.has(model.id) &&
-          !LEGACY_ANTHROPIC_PLAN_MODEL_IDS.has(model.id) &&
-          !LEGACY_GEMINI_PLAN_MODEL_IDS.has(model.id),
-      )
-      .map((model) => {
-        const cloned = cloneChatModel(model);
-        const canonicalModel = GEMINI_PLAN_MODEL_FIELD_OVERRIDES[cloned.id];
-        if (canonicalModel) {
-          // The `model` field is the server-side identifier sent to Code
-          // Assist; never let a stored stale value win over the catalog.
-          cloned.model = canonicalModel;
-        }
-        return cloned;
-      });
+      .filter((model) => !isRetiredModelId(model.id))
+      .map((model) => cloneChatModel(model));
   }
 
   if (candidate.annotationAgents) {
-    migrated.annotationAgents = candidate.annotationAgents.map((agent) => {
-      if (agent?.modelId && LEGACY_GEMINI_PLAN_MODEL_IDS.has(agent.modelId)) {
-        return { ...agent, modelId: GEMINI_PLAN_FALLBACK_MODEL_ID };
-      }
-      return agent;
-    });
+    migrated.annotationAgents = candidate.annotationAgents.map((agent) =>
+      agent?.modelId && isRetiredModelId(agent.modelId)
+        ? { ...agent, modelId: replaceRetiredModelId(agent.modelId) }
+        : agent,
+    );
   }
 
   if (candidate.providers) {
@@ -650,7 +555,7 @@ export function getFirstUsableChatModelId(settings: AISettings): string {
 }
 
 export function normalizeAISettings(candidate?: Partial<AISettings>): AISettings {
-  const migratedCandidate = migrateLegacyPlanModels(candidate);
+  const migratedCandidate = migrateRetiredModels(candidate);
   const defaults = createDefaultAISettings();
   const legacyPackRisk = migratedCandidate?.packRisk;
   const merged: AISettings = {
@@ -670,6 +575,7 @@ export function normalizeAISettings(candidate?: Partial<AISettings>): AISettings
     ),
   );
   delete merged.packRisk;
+  merged.packPreferences = normalizePackPreferences(migratedCandidate?.packPreferences, migratedCandidate);
 
   if (!merged.activeChatModelId || !merged.chatModels.some((model) => model.id === merged.activeChatModelId)) {
     merged.activeChatModelId = getFirstUsableChatModelId(merged);
@@ -720,17 +626,16 @@ function findLegacyModelId(providerType: LegacyAIProvider, modelId?: string): st
   return models[0]?.id ?? DEFAULT_CHAT_MODELS[0]?.id ?? "";
 }
 
+function isCurrentAISettings(candidate: Partial<LegacyAISettings> | AISettings): candidate is AISettings {
+  return "providers" in candidate && Array.isArray(candidate.providers) && "chatModels" in candidate;
+}
+
 export function migrateLegacyAISettings(candidate?: Partial<LegacyAISettings> | AISettings): AISettings {
-  if (
-    candidate &&
-    "providers" in candidate &&
-    Array.isArray((candidate as AISettings).providers) &&
-    "chatModels" in candidate
-  ) {
-    return normalizeAISettings(candidate as AISettings);
+  if (candidate && isCurrentAISettings(candidate)) {
+    return normalizeAISettings(candidate);
   }
 
-  const legacy = candidate as Partial<LegacyAISettings> | undefined;
+  const legacy = candidate;
   const migrated = createDefaultAISettings();
   const providerType = legacy?.provider ?? "openrouter";
 
@@ -830,6 +735,13 @@ export function getProviderApiKey(provider: AIProviderRecord): string | undefine
   return provider.apiKey?.trim() || undefined;
 }
 
+// The native Plan runtimes spawn desktop CLIs; main.ts reports the platform.
+let nativeRuntimeAvailable = true;
+
+export function setNativeRuntimeAvailability(available: boolean): void {
+  nativeRuntimeAvailable = available;
+}
+
 export function getResolvedModelExecutionState(resolved: ResolvedAISelection | null): AIExecutionState {
   if (!resolved) {
     return {
@@ -853,6 +765,16 @@ export function getResolvedModelExecutionState(resolved: ResolvedAISelection | n
   const authToken = getProviderAuthToken(provider);
 
   switch (providerDefinition.authStrategy) {
+    case "native-runtime":
+      // Installation and login are checked by the runtime right before each
+      // request (and on demand in settings); nothing is stored in the vault.
+      return nativeRuntimeAvailable
+        ? { canExecute: true, code: "ready", message: "Ready to run." }
+        : {
+            canExecute: false,
+            code: "unsupported_platform",
+            message: "Plan connections run on desktop only. Use an API key provider on mobile.",
+          };
     case "none":
       return {
         canExecute: Boolean(baseUrl),
@@ -1001,7 +923,6 @@ function buildAIConfigFromResolved(settings: AISettings, resolved: ResolvedAISel
     baseUrl: resolveProviderBaseUrl(provider, providerDefinition),
     authToken: getProviderAuthToken(provider),
     apiKey: getProviderApiKey(provider),
-    managedProjectId: provider.oauth?.managedProjectId,
     supportsGrounding: settings.webGrounding && model.supportsGrounding,
     supportsJsonSchema: model.supportsJsonSchema ?? false,
     supportsJsonObject: model.supportsJsonObject ?? true,
@@ -1046,6 +967,9 @@ export function cloneSettings(settings: AISettings): AISettings {
 
 export function getProviderConnectionSummary(provider: AIProviderRecord): string {
   const definition = getProviderDefinition(provider.type);
+  if (definition.authStrategy === "native-runtime") {
+    return `${definition.label}: ${provider.type === "anthropic-plan" ? "Claude Code" : "Antigravity CLI"} on this computer`;
+  }
   if (provider.type === "openai-plan" && isOpenAIPlanReconnectRequired(provider)) {
     return `${definition.label}: reconnect required`;
   }

@@ -6,7 +6,7 @@ import type {
 } from "../types.ts";
 import { createDefaultAISettings, migrateLegacyAISettings, normalizeAISettings } from "../ai/settings-registry.ts";
 
-export const GLOBAL_PLUGIN_SCHEMA_VERSION = 3;
+export const GLOBAL_PLUGIN_SCHEMA_VERSION = 4;
 export const DEFAULT_WORKBENCH_FOLDER = "NotePack CODEX";
 
 const DEFAULT_LEGACY_MIGRATION_STATE: LegacyMigrationState = {
@@ -42,8 +42,8 @@ function normalizeLegacyMigrationState(raw: unknown): LegacyMigrationState {
   return {
     ...DEFAULT_LEGACY_MIGRATION_STATE,
     ...candidate,
-    migratedProjectIds: Array.isArray(candidate?.migratedProjectIds) ? candidate!.migratedProjectIds : [],
-    migratedPaths: Array.isArray(candidate?.migratedPaths) ? candidate!.migratedPaths : [],
+    migratedProjectIds: Array.isArray(candidate?.migratedProjectIds) ? candidate.migratedProjectIds : [],
+    migratedPaths: Array.isArray(candidate?.migratedPaths) ? candidate.migratedPaths : [],
   };
 }
 
@@ -53,18 +53,36 @@ function normalizeRecentPaths(raw: unknown): string[] {
 }
 
 function normalizeGlobalSettings(raw: unknown): AISettings {
-  return normalizeAISettings((raw || {}) as Partial<AISettings>);
+  return normalizeAISettings(raw || {});
 }
 
-function clearStaleGeminiPlanTokens(settings: AISettings): boolean {
-  let cleared = false;
+const NATIVE_RUNTIME_PROVIDER_TYPES = new Set(["anthropic-plan", "gemini-plan"]);
+const REMOVED_PROVIDER_SETTINGS = ["geminiByoClientId", "geminiByoClientSecret"];
+
+/**
+ * Claude Plan and Gemini Plan run official CLIs since 4.0, so tokens stored by
+ * earlier versions are deleted. Runs on every load, not only on a schema bump:
+ * a synced 3.x client can write them (and schemaVersion 3) back.
+ */
+function removeNativeRuntimeCredentials(settings: AISettings | undefined): boolean {
+  if (!settings || !Array.isArray(settings.providers)) return false;
+  let removed = false;
   for (const provider of settings.providers) {
-    if (provider.type === "gemini-plan" && provider.oauth) {
+    if (!NATIVE_RUNTIME_PROVIDER_TYPES.has(provider.type)) continue;
+    if (provider.oauth) {
       provider.oauth = undefined;
-      cleared = true;
+      removed = true;
+    }
+    if (provider.additionalSettings) {
+      for (const key of REMOVED_PROVIDER_SETTINGS) {
+        if (key in provider.additionalSettings) {
+          delete provider.additionalSettings[key];
+          removed = true;
+        }
+      }
     }
   }
-  return cleared;
+  return removed;
 }
 
 export function migrateGlobalPluginData(savedData: unknown): GlobalDataMigrationResult {
@@ -72,9 +90,10 @@ export function migrateGlobalPluginData(savedData: unknown): GlobalDataMigration
   const migrationsApplied: string[] = [];
 
   if (isLegacyPluginData(savedData)) {
-    const settings = migrateLegacyAISettings(savedData.settings as unknown as Partial<AISettings>);
-    if (clearStaleGeminiPlanTokens(settings)) {
-      migrationsApplied.push("gemini-plan-tokens-cleared");
+    const settings = migrateLegacyAISettings(savedData.settings);
+    const removedFromBackup = removeNativeRuntimeCredentials(savedData.settings);
+    if (removeNativeRuntimeCredentials(settings) || removedFromBackup) {
+      migrationsApplied.push("plan-oauth-tokens-removed");
     }
     return {
       data: {
@@ -92,13 +111,10 @@ export function migrateGlobalPluginData(savedData: unknown): GlobalDataMigration
   }
 
   const candidate = savedData as Partial<NotePackGlobalPluginData>;
-  const previousSchema = typeof candidate.schemaVersion === "number" ? candidate.schemaVersion : 0;
   const settings = normalizeGlobalSettings(candidate.settings);
-
-  if (previousSchema < 3) {
-    if (clearStaleGeminiPlanTokens(settings)) {
-      migrationsApplied.push("gemini-plan-tokens-cleared");
-    }
+  const removedFromBackup = removeNativeRuntimeCredentials(candidate.legacyDataBackup?.settings);
+  if (removeNativeRuntimeCredentials(settings) || removedFromBackup) {
+    migrationsApplied.push("plan-oauth-tokens-removed");
   }
 
   return {

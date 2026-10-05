@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  CODEX_DOCUMENT_SCHEMA_VERSION,
   CodexDocumentParseError,
   UnsupportedCodexSchemaError,
   createCodexDocumentFromProject,
@@ -9,16 +10,17 @@ import {
   parseCodexDocument,
   serializeCodexDocument,
 } from '../src/data/codex-document.ts';
-import { migrateGlobalPluginData } from '../src/data/global-data.ts';
+import { GLOBAL_PLUGIN_SCHEMA_VERSION, migrateGlobalPluginData } from '../src/data/global-data.ts';
 
 test('empty .codex data creates an empty workbench document', () => {
   const document = parseCodexDocument('', 'Workshop');
 
-  assert.equal(document.schemaVersion, 2);
+  assert.equal(document.schemaVersion, CODEX_DOCUMENT_SCHEMA_VERSION);
   assert.equal(document.type, 'notepack-codex-workbench');
   assert.equal(document.title, 'Workshop');
   assert.deepEqual(document.cards, []);
-  assert.equal(document.localSettings.useGlobalDifficulty, true);
+  assert.equal(document.localSettings.useGlobalPackExploration, true);
+  assert.deepEqual(document.localSettings.annotationAgents, []);
 });
 
 test('valid .codex JSON round-trips through the serializer', () => {
@@ -124,9 +126,10 @@ test('global migration preserves AI settings and keeps a legacy backup', () => {
     },
   });
 
-  assert.equal(result.data.schemaVersion, 2);
+  assert.equal(result.data.schemaVersion, GLOBAL_PLUGIN_SCHEMA_VERSION);
   assert.equal(result.data.settings.packExploration, 4);
-  assert.equal(result.data.settings.globalDifficulty, 3);
+  assert.equal(result.data.settings.providers.find((provider) => provider.id === 'openai').apiKey, 'sk-test');
+  assert.equal(result.data.settings.activeChatModelId, 'openai/gpt-6-1-sol');
   assert.equal(result.data.legacyDataBackup.projects.length, 1);
   assert.equal(result.legacyData.projects[0].id, 'p1');
 });

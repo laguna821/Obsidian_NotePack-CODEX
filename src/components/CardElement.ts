@@ -65,7 +65,7 @@ export class CardElement {
     this.callbacks = callbacks;
     this.markdownComponent = new Component();
     this.markdownComponent.load();
-    this.el = document.createElement("div");
+    this.el = createDiv();
     this.render();
   }
 
@@ -209,7 +209,7 @@ export class CardElement {
     const toggleHost = body.createDiv({ cls: "np-tile-fold-host" });
     this.textEl = textEl;
     this.toggleHost = toggleHost;
-    requestAnimationFrame(() => this.evaluateFoldToggle());
+    window.requestAnimationFrame(() => this.evaluateFoldToggle());
   }
 
   private evaluateFoldToggle(): void {
@@ -237,7 +237,7 @@ export class CardElement {
   }
 
   recomputeFoldToggle(): void {
-    requestAnimationFrame(() => this.evaluateFoldToggle());
+    window.requestAnimationFrame(() => this.evaluateFoldToggle());
   }
 
   private renderAnnotations(): void {

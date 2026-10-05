@@ -1,3 +1,4 @@
+import { normalizePackPreferences, buildPreferenceInstruction, buildDepthInstruction } from "./pack-preferences";
 // ── NotePack CODEX Generation Engine ──────────────────────────────────────
 // Implements the full Common/Rare/Epic/Legendary rarity logic from CODEX v2.1
 
@@ -6,7 +7,6 @@ import type {
   PackCard,
   PackSession,
   Rarity,
-  AIConfig,
 } from "../types";
 import { RARITY_EFFECT_TEXT } from "../types";
 import type { EffectiveWorkbenchRuntimeSettings } from "../data/runtime-settings";
@@ -167,54 +167,28 @@ ${sourceContext}`;
 
 // ── Main Generation Function ────────────────────────────────────────────
 
-const PACK_OUTPUT_SCHEMA = {
-  type: "object",
-  properties: {
-    cards: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "number" },
-          rarity: { type: "string", enum: ["common", "rare", "epic", "legendary"] },
-          card_name: { type: "string" },
-          hook: { type: "string" },
-          main_question: { type: "string" },
-          bridge_steps: { type: "array", items: { type: "string" } },
-          write_now: { type: "array", items: { type: "string" } },
-          followups: { type: "array", items: { type: "string" } },
-          suggested_tags: { type: "array", items: { type: "string" } },
-          suggested_links: { type: "array", items: { type: "string" } },
-          failure_signal: { type: "string" },
-          questionType: { type: "string" },
-          lens: { type: "string" },
-        },
-        required: [
-          "id", "rarity", "card_name", "hook", "main_question",
-          "bridge_steps", "write_now", "followups", "suggested_tags", "suggested_links",
-        ],
-      },
-    },
-  },
-  required: ["cards"],
-};
-
 export async function generatePack(
   runtime: EffectiveWorkbenchRuntimeSettings,
   sourceCards: WorkbenchCard[],
   nearbyCards: WorkbenchCard[],
   pityCounter: number,
+  signal?: AbortSignal,
 ): Promise<PackSession> {
   if (sourceCards.length === 0) throw new Error("No source cards provided");
   const config = buildAIConfig(runtime.ai);
   if (!config) throw new Error("No API key configured");
 
+  signal?.throwIfAborted();
+  const started = Date.now();
+  const preferences = normalizePackPreferences(runtime.ai.packPreferences, runtime.ai);
   const seed = generateSeed();
   const risk = runtime.packExploration;
   const packSize = 5;
 
   // Sample rarities
-  const rarities = samplePackRarities(packSize, risk, pityCounter, runtime.ai.packPityEnabled);
+  const rarities = preferences.rarity === "auto"
+    ? samplePackRarities(packSize, risk, pityCounter, runtime.ai.packPityEnabled)
+    : Array<Rarity>(packSize).fill(preferences.rarity);
 
   // Build source context
   const sourceContext = buildSourceContext(sourceCards, nearbyCards);
@@ -222,10 +196,10 @@ export async function generatePack(
   // Build per-card prompts
   const cardPrompts = rarities.map((rarity, i) => {
     switch (rarity) {
-      case "common": return buildCommonPrompt(i + 1, sourceContext);
-      case "rare": return buildRarePrompt(i + 1, sourceContext);
-      case "epic": return buildEpicPrompt(i + 1, sourceContext);
-      case "legendary": return buildLegendaryPrompt(i + 1, sourceContext);
+      case "common": return buildCommonPrompt(i + 1, "");
+      case "rare": return buildRarePrompt(i + 1, "");
+      case "epic": return buildEpicPrompt(i + 1, "");
+      case "legendary": return buildLegendaryPrompt(i + 1, "");
     }
   });
 
@@ -263,16 +237,17 @@ Your job is NOT to extend each seed separately. Instead:
 `
     : "";
 
-  // Difficulty prompt isolation: only customPackDifficultyPrompt is consumed
-  // here. Never propagate this value into enrich.ts (AI persona annotations).
-  // Empty input falls back to the built-in easy preset.
+  // Pack preferences do not change AI persona annotations or synthesis.
+  // Preserve an explicitly selected custom prompt; otherwise use the depth setting.
   const packDifficultyPrompt =
-    (runtime.customPackDifficultyPrompt ?? "").trim() || getDefaultPackDifficultyPrompt();
+    preferences.promptMode === "custom"
+      ? (runtime.customPackDifficultyPrompt ?? "").trim() || getDefaultPackDifficultyPrompt()
+      : buildDepthInstruction(preferences.difficulty);
 
   const systemPrompt = `${multiSeedDirective}## DIFFICULTY PROFILE — HIGHEST PRIORITY (overrides all other instructions below)
 ${packDifficultyPrompt}
 
-The lens names listed in the diversity rules below (epistemology, phenomenology, etc.) are INTERNAL category labels for diversity tracking. They MUST NOT appear as visible words in card_name, hook, main_question, bridge_steps, write_now, or followups. Translate them into the school-year vocabulary required by the Difficulty Profile above.
+The lens names below are internal diversity labels. Write naturally for the reader rather than displaying the label.
 
 ---
 
@@ -285,7 +260,10 @@ Each card follows a specific rarity engine that determines how the question is g
 ## CRITICAL Rules
 ${langDirective}
 
-- Rarity is NOT difficulty. Common/Rare/Epic/Legendary controls conceptual distance only. Even a Legendary card must obey the Difficulty Profile above.
+- Rarity selects the thinking structure described by each engine. Difficulty controls how demanding the inquiry is within that structure; it must not make the sentence harder to understand.
+- Common stays near the source. Rare, Epic, and Legendary may leave it entirely: do not force the source scene, names, or an explanation of the connection into the question.
+- main_question is a standalone writing topic: understandable without the source or the guide. Let it invite thought rather than list tasks. Put optional writing support in write_now and followups.
+- Do not invent personal experiences or real-world facts. Clearly introduce any imagined situation.
 - Each card MUST have a unique questionType from: ${diversityTypes.join(", ")}
 - Each card MUST have a unique lens from: ${diversityLenses.join(", ")}
 - No two cards should have the same question type or lens within the pack
@@ -294,12 +272,15 @@ ${langDirective}
 - suggested_links should use [[NEW: ...]] format for new notes
 - suggested_tags should start with #
 
+## User preferences
+${buildPreferenceInstruction(preferences)}
+
 ## Output Format
 Return a single JSON object with a "cards" array of ${packSize} objects.
 Each card object must have: id (1-${packSize}), rarity, card_name, hook, main_question, bridge_steps[], write_now[], followups[], suggested_tags[], suggested_links[], failure_signal (required for epic/legendary, optional for common/rare), questionType, lens.
 
 ## Final self-check before returning
-Re-read each card's visible strings. If any banned word from the Difficulty Profile leaked in, rewrite that field in school-appropriate Korean before returning.`;
+Read the main questions on their own: preserve their meaning and make them natural, clear, and distinct.`;
 
   const userMessage = `## Source Note
 ${sourceContext}
@@ -319,51 +300,12 @@ Return ONLY a valid JSON object with the "cards" array.`;
     ],
     temperature: 0.7 + risk * 0.03,
     response_format: { type: "json_object" },
+    signal,
   });
 
-  // Parse the result
-  let parsedCards: PackCard[];
-  try {
-    const parsed = JSON.parse(extractJsonCandidate(result.content) ?? result.content);
-    const rawCards = parsed.cards || parsed;
-    parsedCards = (Array.isArray(rawCards) ? rawCards : [rawCards]).map((c: any, i: number) => ({
-      id: c.id ?? i + 1,
-      rarity: rarities[i] || "common",
-      effect_text: RARITY_EFFECT_TEXT[rarities[i] || "common"],
-      card_name: c.card_name || `Card ${i + 1}`,
-      hook: c.hook || "",
-      main_question: c.main_question || "",
-      bridge_steps: c.bridge_steps || [],
-      write_now: c.write_now || [],
-      followups: c.followups || [],
-      suggested_tags: c.suggested_tags || [],
-      suggested_links: c.suggested_links || [],
-      failure_signal: c.failure_signal || "",
-      obsidian_template: buildObsidianTemplate(c, rarities[i] || "common", seed),
-      questionType: c.questionType || "",
-      lens: c.lens || "",
-    }));
-  } catch (e) {
-    throw new Error(`Failed to parse pack generation result: ${result.content.substring(0, 300)}`);
-  }
-
-  // Ensure we have exactly packSize cards
-  while (parsedCards.length < packSize) {
-    parsedCards.push({
-      id: parsedCards.length + 1,
-      rarity: "common",
-      effect_text: RARITY_EFFECT_TEXT.common,
-      card_name: "생성 실패",
-      hook: "카드 생성에 실패했습니다. 다시 시도해주세요.",
-      main_question: "",
-      bridge_steps: [],
-      write_now: [],
-      followups: [],
-      suggested_tags: [],
-      suggested_links: [],
-      obsidian_template: "",
-    });
-  }
+  signal?.throwIfAborted();
+  const parsedCards = parsePackResponse(result.content, rarities, seed);
+  for (const card of parsedCards) card.generationSettings = structuredClone(preferences);
 
   const session: PackSession = {
     packId: seed,
@@ -376,7 +318,9 @@ Return ONLY a valid JSON object with the "cards" array.`;
     risk,
     style: "탐구",
     weights: adjustWeightsForRisk(risk, DEFAULT_WEIGHTS),
-    cards: parsedCards.slice(0, packSize),
+    cards: parsedCards,
+    generationSettings: structuredClone(preferences),
+    generationMs: Date.now() - started,
     keptIds: [],
     discardedIds: [],
   };
@@ -485,9 +429,49 @@ ${seedBlocks.join("\n\n")}`;
   return ctx;
 }
 
-function buildObsidianTemplate(card: any, rarity: Rarity, seed: string): string {
-  const tags = (card.suggested_tags || []).map((t: string) => `  - ${t}`).join("\n");
-  const links = (card.suggested_links || []).map((l: string) => `  - ${l}`).join("\n");
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function textField(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value ? value : fallback;
+}
+
+function listField(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/** Builds a pack card from one card object of the model's JSON reply. */
+function toPackCard(raw: Record<string, unknown>, index: number, rarity: Rarity, seed: string): PackCard {
+  const card = {
+    id: typeof raw.id === "number" ? raw.id : index + 1,
+    rarity,
+    effect_text: RARITY_EFFECT_TEXT[rarity],
+    card_name: textField(raw.card_name, `Card ${index + 1}`),
+    hook: textField(raw.hook),
+    main_question: textField(raw.main_question),
+    bridge_steps: listField(raw.bridge_steps),
+    write_now: listField(raw.write_now),
+    followups: listField(raw.followups),
+    suggested_tags: listField(raw.suggested_tags),
+    suggested_links: listField(raw.suggested_links),
+    failure_signal: textField(raw.failure_signal),
+    questionType: textField(raw.questionType),
+    lens: textField(raw.lens),
+  };
+  return { ...card, obsidian_template: buildObsidianTemplate(card, rarity, seed) };
+}
+
+type TemplateFields = Pick<
+  PackCard,
+  "main_question" | "bridge_steps" | "write_now" | "followups" | "suggested_tags" | "suggested_links"
+>;
+
+export function buildObsidianTemplate(card: TemplateFields, rarity: Rarity, seed: string): string {
+  const tags = card.suggested_tags.map((t) => "  - " + JSON.stringify(t)).join("\n");
+  const links = card.suggested_links.map((l) => "  - " + JSON.stringify(l)).join("\n");
 
   return `---
 type: card
@@ -501,28 +485,48 @@ ${links}
 ---
 
 ## 🃏 질문(카드 텍스트)
-- Q: ${card.main_question || ""}
+- Q: ${card.main_question}
 
 ## 왜 이 질문이 지금 나왔나(Bridge)
-${(card.bridge_steps || []).map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}
+${card.bridge_steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 
-## 10분 초안(무조건 쓰기)
-${(card.write_now || []).map((s: string) => `- ${s}`).join("\n")}
+## 작성 도움(선택)
+${card.write_now.map((s) => `- ${s}`).join("\n")}
 
 ## 확장(선택)
-${(card.followups || []).map((s: string) => `- ${s}`).join("\n")}
+${card.followups.map((s) => `- ${s}`).join("\n")}
 
 ## 다음 액션
 - NEW 노트 제안:
-${(card.suggested_links || []).filter((l: string) => l.includes("NEW")).map((l: string) => `  - ${l}`).join("\n")}
+${card.suggested_links.filter((l) => l.includes("NEW")).map((l) => `  - ${l}`).join("\n")}
 `;
 }
 
-function extractJsonCandidate(content: string): string | null {
+export function extractJsonCandidate(content: string): string | null {
   const fenceMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   if (fenceMatch) return fenceMatch[1].trim();
   const start = content.indexOf("{");
   const end = content.lastIndexOf("}");
   if (start !== -1 && end > start) return content.slice(start, end + 1).trim();
   return null;
+}
+
+/** Structural validation only. Never fill missing cards or call a model again. */
+export function parsePackResponse(content: string, rarities: Rarity[], seed: string): PackCard[] {
+  let parsed: unknown;
+  try { parsed = JSON.parse(extractJsonCandidate(content) ?? content); }
+  catch { throw new Error("카드 응답을 읽지 못했습니다. 다시 뽑기를 눌러주세요."); }
+  const cards = asRecord(parsed)?.cards;
+  if (!Array.isArray(cards) || cards.length !== rarities.length) throw new Error("카드 다섯 장이 모두 도착하지 않았습니다. 이전 팩은 유지됩니다.");
+  const seen = new Set<number>();
+  for (const value of cards) {
+    const c = asRecord(value);
+    if (!c || typeof c.id !== "number" || !Number.isInteger(c.id) || c.id < 1 || c.id > rarities.length || seen.has(c.id)) throw new Error("카드 번호가 올바르지 않습니다. 다시 뽑기를 눌러주세요.");
+    seen.add(c.id);
+    if (typeof c.main_question !== "string" || !c.main_question.trim() || typeof c.card_name !== "string" || !c.card_name.trim()) throw new Error("비어 있는 카드가 있어 팩을 저장하지 않았습니다.");
+    for (const field of ["bridge_steps","write_now","followups","suggested_tags","suggested_links"]) {
+      if (!Array.isArray(c[field]) || !(c[field] as unknown[]).every(v => typeof v === "string")) throw new Error("카드 도움말 형식을 읽지 못했습니다. 다시 뽑기를 눌러주세요.");
+    }
+  }
+  return cards.sort((a,b) => a.id-b.id).map((c,i) => toPackCard(c,i,rarities[i],seed));
 }

@@ -77,16 +77,16 @@ export type Rarity = "common" | "rare" | "epic" | "legendary";
 
 export const RARITY_LABELS: Record<Rarity, string> = {
   common: "기본",
-  rare: "주목",
-  epic: "핵심",
-  legendary: "원형",
+  rare: "희귀",
+  epic: "영웅",
+  legendary: "전설",
 };
 
 export const RARITY_EFFECT_TEXT: Record<Rarity, string> = {
   common: "기본 카드",
-  rare: "✨ 주목 카드",
-  epic: "💡 핵심 카드",
-  legendary: "🌟 원형 카드",
+  rare: "✨ 희귀 카드",
+  epic: "💡 영웅 카드",
+  legendary: "🌟 전설 카드",
 };
 
 export const RARITY_COLORS: Record<Rarity, string> = {
@@ -190,6 +190,7 @@ export interface WorkbenchCard {
 
   // Pack origin (for growth cards)
   sourcePackId?: string;
+  packCard?: PackCard;
   sourceCardId?: string;
   sourceCardIds?: string[];
   rarity?: Rarity;
@@ -218,6 +219,7 @@ export interface WorkbenchCard {
 // ── Pack Card (generated in modal) ─────────────────────────────────────────
 
 export interface PackCard {
+  generationSettings?: import("./ai/pack-preferences").PackPreferences;
   id: number;
   rarity: Rarity;
   effect_text: string;
@@ -253,6 +255,8 @@ export interface PackSession {
   style: string;
   weights: { common: number; rare: number; epic: number; legendary: number };
   cards: PackCard[];
+  generationSettings?: import("./ai/pack-preferences").PackPreferences;
+  generationMs?: number;
   keptIds: number[];
   discardedIds: number[];
 }
@@ -312,7 +316,6 @@ export interface AIOAuthState {
   lastErrorMessage?: string;
   accountId?: string;
   email?: string;
-  managedProjectId?: string;
 }
 
 export interface AIProviderDefinition {
@@ -323,7 +326,8 @@ export interface AIProviderDefinition {
   baseUrlPlaceholder?: string;
   requiresApiKey: boolean;
   requiresBaseUrl: boolean;
-  authStrategy: "none" | "apiKey" | "oauth" | "apiKey-or-oauth";
+  /** "native-runtime" runs the user's own installed Claude Code / Antigravity CLI. */
+  authStrategy: "none" | "apiKey" | "oauth" | "apiKey-or-oauth" | "native-runtime";
   family: AIProviderFamily;
   keyUrl?: string;
   keyPlaceholder?: string;
@@ -341,14 +345,22 @@ export interface AIProviderRecord {
   additionalSettings?: AIProviderAdditionalSettings;
 }
 
+export type AIClaudeEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+// Codex "Ultra" runs subagents in the Codex app; it is not a per-request effort.
+export type AIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface AIThinkingConfig {
   enabled: boolean;
+  /** Token budget for models that still take one (Claude Haiku 4.5 and older). */
   budget_tokens?: number;
+  /** Adaptive-thinking effort for Claude 4.6+ models and the Claude Code CLI. */
+  effort?: AIClaudeEffort;
 }
 
 export interface AIReasoningConfig {
   enabled: boolean;
-  reasoning_effort?: "low" | "medium" | "high";
+  reasoning_effort?: AIReasoningEffort;
 }
 
 export interface AIChatModel {
@@ -385,6 +397,7 @@ export interface AISettings {
   packPityEnabled: boolean;
   promotionFolder: string;
   noteAuthor: string;
+  packPreferences?: import("./ai/pack-preferences").PackPreferences;
   customPackDifficultyPrompt: string;
   customSynthesisPrompt: string;
   uiLanguage: "ko" | "en";
@@ -414,7 +427,6 @@ export interface AIConfig {
   baseUrl: string;
   authToken?: string;
   apiKey?: string;
-  managedProjectId?: string;
   supportsGrounding: boolean;
   supportsJsonSchema: boolean;
   supportsJsonObject: boolean;
@@ -503,7 +515,7 @@ export interface LegacyNotePackPluginData {
 export type NotePackPluginData = LegacyNotePackPluginData;
 
 export interface NotePackGlobalPluginData {
-  schemaVersion: 2 | 3;
+  schemaVersion: 2 | 3 | 4;
   settings: AISettings;
   recentWorkbenchPaths: string[];
   lastOpenedWorkbenchPath?: string;

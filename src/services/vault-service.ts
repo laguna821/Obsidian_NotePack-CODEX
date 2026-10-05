@@ -1,11 +1,21 @@
+import { buildObsidianTemplate } from "../ai/notepack-engine";
 import { type App, normalizePath } from "obsidian";
 import { getPrimaryAnnotation } from "../data/annotations";
 import type { PackCard, WorkbenchCard } from "../types";
 
 export class VaultService {
-  constructor(private app: App) {}
+  private app: App;
+
+  constructor(app: App) {
+    this.app = app;
+  }
 
   async promoteCard(card: WorkbenchCard, folder: string, author?: string): Promise<string> {
+    if (card.packCard) {
+      const pack = { ...card.packCard, card_name: card.title || card.packCard.card_name, main_question: card.text };
+      pack.obsidian_template = buildObsidianTemplate(pack, pack.rarity, card.sourcePackId || "kept-pack");
+      return this.promotePackCard(pack, card, folder, author);
+    }
     const folderPath = normalizePath(folder);
     await this.ensureFolder(folderPath);
 
@@ -49,11 +59,11 @@ export class VaultService {
   }
 
   async mergeIntoNote(card: WorkbenchCard, notePath: string): Promise<void> {
-    const file = this.app.vault.getAbstractFileByPath(notePath);
+    const file = this.app.vault.getFileByPath(notePath);
     if (!file) throw new Error(`Note not found: ${notePath}`);
 
-    const existing = await this.app.vault.read(file as any);
-    await this.app.vault.modify(file as any, `${existing}\n\n---\n\n## Added Card\n\n${card.text}`);
+    const existing = await this.app.vault.read(file);
+    await this.app.vault.modify(file, `${existing}\n\n---\n\n## Added Card\n\n${card.text}`);
   }
 
   private async ensureFolder(path: string): Promise<void> {
@@ -83,7 +93,7 @@ export class VaultService {
   private escapeFrontmatterValue(value: string): string {
     const trimmed = value.trim();
     if (!trimmed) return "";
-    if (/[:#\n\r"'\\\[\]{}&*!|>%@`?]/.test(trimmed)) {
+    if (/[:#\n\r"'\\[\]{}&*!|>%@`?]/.test(trimmed)) {
       const escaped = trimmed.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       return `"${escaped}"`;
     }

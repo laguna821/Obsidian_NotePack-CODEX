@@ -5,6 +5,7 @@ import type { WorkbenchCard, GhostNote } from "../types";
 import type { EffectiveWorkbenchRuntimeSettings } from "../data/runtime-settings";
 import { getLanguageInstruction } from "../data/runtime-settings";
 import { buildAIConfig, chatCompletion } from "./providers";
+import { extractJsonCandidate } from "./notepack-engine";
 import { getDefaultSynthesisPrompt } from "./difficulty-presets";
 
 export interface SynthesisResult {
@@ -16,6 +17,7 @@ export async function generateSynthesis(
   runtime: EffectiveWorkbenchRuntimeSettings,
   enrichedCards: WorkbenchCard[],
   previousSyntheses: string[] = [],
+  signal?: AbortSignal,
 ): Promise<SynthesisResult> {
   const config = buildAIConfig(runtime.ai);
   if (!config) throw new Error("No API key configured");
@@ -75,11 +77,12 @@ Return ONLY valid JSON:
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
     temperature: 0.7,
+    signal,
   });
 
-  // Defensive parse
+  // Defensive parse: CLI-backed models may wrap the JSON in a code fence.
   try {
-    return JSON.parse(result.content) as SynthesisResult;
+    return JSON.parse(extractJsonCandidate(result.content) ?? result.content) as SynthesisResult;
   } catch {
     const textMatch = result.content.match(/"text":\s*"(.*?)"/);
     const catMatch = result.content.match(/"category":\s*"(.*?)"/);

@@ -1,8 +1,9 @@
-import { requestUrl, type RequestUrlParam } from "obsidian";
+import { Platform, requestUrl, type RequestUrlParam } from "obsidian";
 import type { AIConfig, AIOAuthState } from "../types";
 import {
   buildAnthropicMessagesBody,
   claudeCliEffort,
+  geminiThinkingConfig,
   normalizeMessageContent,
   rejectsSampling,
   splitMessagesForCli,
@@ -17,7 +18,9 @@ import {
 } from "./openai-plan";
 import { refreshOpenAIPlanToken, type OAuthTokenResponse } from "./oauth";
 import { getNativeRuntime } from "./native/runtime";
+import { requestPublicTextStream } from "./native/http-stream";
 import { executeProviderRequest } from "./rate-limiter";
+import { explicitOutputSchema } from "./structured-output";
 
 export { buildAIConfig, buildAIConfigForModel } from "./settings-registry";
 export type { ChatCompletionOptions, ChatMessage } from "./request-shapes";
@@ -40,7 +43,7 @@ interface AnthropicMessageResponse {
 interface GeminiResponse {
   text?: string;
   candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
+    content?: { parts?: Array<{ text?: string; thought?: boolean }> };
     groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
     citationMetadata?: { citationSources?: Array<{ uri?: string }> };
   }>;
@@ -194,6 +197,7 @@ async function callOpenAIPlanChatCompletion(
   config: AIConfig,
   options: ChatCompletionOptions,
 ): Promise<{ content: string; annotations?: unknown[] }> {
+  const outputSchema = explicitOutputSchema(options.response_format);
   const body = JSON.stringify(
     buildOpenAIPlanCodexRequestBody({
       model: options.model,
@@ -202,6 +206,7 @@ async function callOpenAIPlanChatCompletion(
         content: normalizeMessageContent(message.content),
       })),
       reasoning_effort: config.model.reasoning?.enabled ? config.model.reasoning.reasoning_effort : undefined,
+      response_format: options.response_format,
     }),
   );
 
@@ -212,7 +217,9 @@ async function callOpenAIPlanChatCompletion(
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : "Reconnect OpenAI Plan in settings.");
     }
-    const response = await requestUrl({
+    const response = options.onTextDelta && Platform.isDesktop ? await requestPublicTextStream({
+      url: OPENAI_PLAN_CODEX_URL, headers: auth.headers, body, signal: options.signal, onTextDelta: outputSchema ? () => {} : options.onTextDelta,
+    }) : await requestUrl({
       url: OPENAI_PLAN_CODEX_URL,
       method: "POST",
       headers: auth.headers,
@@ -234,7 +241,7 @@ async function callOpenAIPlanChatCompletion(
     return result;
   });
 
-  return parseOpenAIPlanCodexSse(response.text);
+  return parseOpenAIPlanCodexSse(response.text, Boolean(outputSchema));
 }
 
 async function callOpenAICompatibleChatCompletion(
@@ -337,6 +344,7 @@ async function callClaudePlanChatCompletion(
   options: ChatCompletionOptions,
 ): Promise<{ content: string; annotations?: unknown[] }> {
   const { systemPrompt, prompt } = splitMessagesForCli(options.messages);
+  const outputSchema = explicitOutputSchema(options.response_format);
   const content = await executeProviderRequest(config.providerType, options.signal, () =>
     getNativeRuntime().completeWithClaude({
       model: options.model,
@@ -344,6 +352,8 @@ async function callClaudePlanChatCompletion(
       systemPrompt,
       prompt,
       signal: options.signal,
+      onTextDelta: options.onTextDelta,
+      jsonSchema: outputSchema?.schema,
     }),
   );
   return { content, annotations: undefined };
@@ -459,15 +469,8 @@ function buildGeminiGenerationConfig(
     generationConfig.responseJsonSchema = responseJsonSchema;
   }
 
-  if (config.model.thinking?.enabled) {
-    const thinkingConfig: Record<string, unknown> = {};
-    if (config.model.thinking.budget_tokens !== undefined) {
-      thinkingConfig.thinkingBudget = config.model.thinking.budget_tokens;
-    }
-    if (Object.keys(thinkingConfig).length > 0) {
-      generationConfig.thinkingConfig = thinkingConfig;
-    }
-  }
+  const thinkingConfig = geminiThinkingConfig(config.model.model, config.model.thinking);
+  if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
 
   return Object.keys(generationConfig).length > 0 ? generationConfig : undefined;
 }
@@ -476,11 +479,13 @@ function extractGeminiText(data: GeminiResponse | undefined): string {
   const candidate = data?.candidates?.[0];
   const parts = candidate?.content?.parts;
   const text = (Array.isArray(parts) ? parts : [])
+    .filter((part) => part?.thought !== true)
     .map((part) => part?.text || "")
     .join("\n")
     .trim();
 
-  return text || data?.text || "";
+  // A proxy's top-level text must not reintroduce a filtered thought part.
+  return Array.isArray(parts) ? text : data?.text || "";
 }
 
 function extractGeminiAnnotations(

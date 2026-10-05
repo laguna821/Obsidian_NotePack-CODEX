@@ -1,4 +1,5 @@
 import type { AIOAuthState, AIReasoningEffort } from "../types";
+import { explicitOutputSchema, parseUniqueJson } from "./structured-output.ts";
 
 export interface OpenAIPlanChatMessage {
   role: "system" | "user" | "assistant";
@@ -106,6 +107,8 @@ export function buildOpenAIPlanCodexRequestBody(options: OpenAIPlanRequestOption
   };
 
   if (instructions) body.instructions = instructions;
+  const outputSchema = explicitOutputSchema(options.response_format);
+  if (outputSchema) body.text = { format: { type: "json_schema", ...outputSchema } };
 
   if (options.reasoning_effort || options.reasoning_summary) {
     body.reasoning = {
@@ -141,7 +144,7 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-function parseSseJsonEvents(payload: string): Array<Record<string, unknown>> {
+function parseSseJsonEvents(payload: string, strict = false): Array<Record<string, unknown>> {
   const blocks = payload.split(/\r?\n\r?\n/);
   const events: Array<Record<string, unknown>> = [];
 
@@ -161,10 +164,12 @@ function parseSseJsonEvents(payload: string): Array<Record<string, unknown>> {
     if (!data || data === "[DONE]") continue;
 
     try {
-      const parsed: unknown = JSON.parse(data);
+      const parsed: unknown = strict ? parseUniqueJson(data) : JSON.parse(data);
       const record = asRecord(parsed);
+      if (strict && !record) throw new Error("Structured SSE event must be an object.");
       if (record) events.push(record);
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       // Ignore non-JSON SSE frames.
     }
   }
@@ -194,21 +199,34 @@ function extractResponseOutputText(response: Record<string, unknown> | undefined
     .trim();
 }
 
-export function parseOpenAIPlanCodexSse(payload: string): { content: string; annotations?: unknown[] } {
+export function parseOpenAIPlanCodexSse(payload: string, requireStructured = false): { content: string; annotations?: unknown[] } {
   let deltaText = "";
   let finalResponse: Record<string, unknown> | undefined;
   let lastErrorMessage = "";
   let failed = false;
+  let completed = false;
+  let refused = false;
+  let errorEvent = false;
 
-  for (const event of parseSseJsonEvents(payload)) {
+  for (const event of parseSseJsonEvents(payload, requireStructured)) {
+    const itemContent = asRecord(event.item)?.content;
+    if (asRecord(event.part)?.type === "refusal" || (Array.isArray(itemContent) && itemContent.some(part => asRecord(part)?.type === "refusal"))) refused = true;
     switch (event.type) {
+      case "response.refusal.delta":
+      case "response.refusal.done":
+        refused = true;
+        break;
       case "response.output_text.delta":
         if (typeof event.delta === "string") {
           deltaText += event.delta;
         }
         break;
       case "response.completed":
+        completed = !requireStructured || asRecord(event.response)?.status === "completed";
+        finalResponse = asRecord(event.response) ?? (requireStructured ? undefined : finalResponse);
+        break;
       case "response.incomplete":
+        completed = false;
         finalResponse = asRecord(event.response) ?? finalResponse;
         break;
       case "response.failed": {
@@ -219,6 +237,7 @@ export function parseOpenAIPlanCodexSse(payload: string): { content: string; ann
         break;
       }
       case "error":
+        errorEvent = true;
         lastErrorMessage =
           typeof asRecord(event.error)?.message === "string"
             ? String(asRecord(event.error)?.message)
@@ -231,10 +250,21 @@ export function parseOpenAIPlanCodexSse(payload: string): { content: string; ann
 
   // A failed response may have streamed a partial answer; never return it.
   if (failed) throw new Error(lastErrorMessage);
+  const hasRefusal = Array.isArray(finalResponse?.output) && finalResponse.output.some(item => {
+    const content = asRecord(item)?.content;
+    return Array.isArray(content) && content.some(part => asRecord(part)?.type === "refusal");
+  });
+  if (requireStructured && (refused || hasRefusal)) throw new Error("Structured OpenAI Plan response was refused.");
+  if (requireStructured && (!completed || errorEvent || lastErrorMessage || finalResponse?.status !== "completed")) {
+    throw new Error(lastErrorMessage || "Structured OpenAI Plan response did not complete.");
+  }
+  // Some successful streaming responses omit the assembled body in the terminal
+  // envelope. Only after confirmed completion may the public deltas be parsed.
   const content = extractResponseOutputText(finalResponse) || deltaText.trim();
   if (!content) {
     throw new Error(lastErrorMessage || "No content in OpenAI Plan response");
   }
+  if (requireStructured && !asRecord(parseUniqueJson(content))) throw new Error("Structured OpenAI Plan output must be an object.");
 
   return {
     content,

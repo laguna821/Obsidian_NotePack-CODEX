@@ -1,3 +1,4 @@
+import { normalizePackPreferences } from "./pack-preferences.ts";
 import type {
   AIChatModel,
   AIConfig,
@@ -574,6 +575,7 @@ export function normalizeAISettings(candidate?: Partial<AISettings>): AISettings
     ),
   );
   delete merged.packRisk;
+  merged.packPreferences = normalizePackPreferences(migratedCandidate?.packPreferences, migratedCandidate);
 
   if (!merged.activeChatModelId || !merged.chatModels.some((model) => model.id === merged.activeChatModelId)) {
     merged.activeChatModelId = getFirstUsableChatModelId(merged);

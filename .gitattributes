@@ -1,2 +1,2 @@
-# esbuild bundles these as text; keep LF so a Windows build matches the CI release build.
-*.md text eol=lf
+# Keep text stable across Windows and the release builder; binary files stay binary.
+* text=auto eol=lf

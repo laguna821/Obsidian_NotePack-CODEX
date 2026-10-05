@@ -1,3 +1,5 @@
+import { renderPackPreferences } from "./components/PackPreferenceControls";
+import { normalizePackPreferences } from "./ai/pack-preferences";
 import {
   App,
   Modal,
@@ -2061,12 +2063,19 @@ export class NotePackSettingTab extends PluginSettingTab {
       text: t("settingsCardDifficultyIsolationNote"),
     });
 
+    const controls = containerEl.createDiv();
+    renderPackPreferences(controls, normalizePackPreferences(settings.packPreferences, settings), value => {
+      this.saveSettingsQuietly({ ...this.plugin.settingsStore.settings, packPreferences: value });
+    });
+    const custom = containerEl.createEl("details");
+    custom.createEl("summary", { text: "사용자 난도 프롬프트 편집" });
+
     // Synthesis difficulty UI removed in v3.0.3 — pack draw difficulty applies
     // to all card-draw scenarios (single or multi-card). The synthesis backend
     // (generateSynthesis) still exists and falls back to the built-in easy
     // preset when no custom prompt is stored.
     this.renderDifficultyPromptSection(
-      containerEl,
+      custom,
       "",
       PACK_DIFFICULTY_PRESETS,
       settings.customPackDifficultyPrompt ?? "",

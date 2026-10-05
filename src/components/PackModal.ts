@@ -1,3 +1,5 @@
+import { renderPackPreferences } from "./PackPreferenceControls";
+import { DOMAINS, normalizePackPreferences, type PackPreferences } from "../ai/pack-preferences";
 import { Modal, Notice, type App } from "obsidian";
 import { generatePack } from "../ai/notepack-engine";
 import { getActiveModelExecutionState } from "../ai/settings-registry";
@@ -17,9 +19,14 @@ export class PackModal extends Modal {
   private readonly store: WorkbenchDocumentStore;
   private readonly runtime: EffectiveWorkbenchRuntimeSettings;
   private readonly sourceCards: WorkbenchCard[];
+  private readonly onPreferencesSave?: (preferences: PackPreferences) => void;
   private readonly onKeepCard: (packCard: PackCard) => void;
 
   private session: PackSession | null = null;
+  private closed = false;
+  private preferenceField: HTMLFieldSetElement | null = null;
+  private preferencePanel: HTMLDetailsElement | null = null;
+  private cancelButton: HTMLButtonElement | null = null;
   private cardElements: PackCardElement[] = [];
   private contentInnerEl: HTMLElement | null = null;
   private isGenerating = false;
@@ -33,12 +40,14 @@ export class PackModal extends Modal {
     runtime: EffectiveWorkbenchRuntimeSettings,
     sourceCards: WorkbenchCard[],
     onKeepCard: (packCard: PackCard) => void,
+    onPreferencesSave?: (preferences: PackPreferences) => void,
   ) {
     super(app);
     this.store = store;
     this.runtime = runtime;
     this.sourceCards = sourceCards;
     this.onKeepCard = onKeepCard;
+    this.onPreferencesSave = onPreferencesSave;
   }
 
   async onOpen(): Promise<void> {
@@ -76,6 +85,17 @@ export class PackModal extends Modal {
       });
     }
 
+    this.preferencePanel = contentEl.createEl("details", { cls: "np-pack-preference-panel" });
+    this.preferencePanel.open = true;
+    this.preferencePanel.createEl("summary", { text: "이번 팩 설정" });
+    this.preferenceField = this.preferencePanel.createEl("fieldset", { cls: "np-pack-preference-field" });
+    this.preferenceField.createEl("legend", { text: "분야·등급·사고 성향" });
+    const preferenceControls = this.preferenceField.createDiv();
+    renderPackPreferences(preferenceControls, normalizePackPreferences(this.runtime.ai.packPreferences, this.runtime.ai), value => {
+      this.runtime.ai.packPreferences = value;
+      this.onPreferencesSave?.(value);
+    });
+
     const controls = contentEl.createDiv({ cls: "np-pack-modal-controls" });
 
     const explorationGroup = controls.createDiv({ cls: "np-pack-modal-control-group" });
@@ -94,13 +114,16 @@ export class PackModal extends Modal {
 
     const rerollButton = controls.createEl("button", {
       cls: "np-pack-modal-reroll",
-      text: t("reroll"),
+      text: "카드 다섯 장 뽑기",
     });
     rerollButton.addEventListener("click", () => {
       if (this.isGenerating) return;
       void this.generate();
     });
     this.rerollButtonEl = rerollButton;
+    this.cancelButton = controls.createEl("button", { text: "생성 취소" });
+    this.cancelButton.hidden = true;
+    this.cancelButton.addEventListener("click", () => this.generationController?.abort());
 
     this.contentInnerEl = contentEl.createDiv({ cls: "np-pack-modal-cards" });
 
@@ -111,7 +134,7 @@ export class PackModal extends Modal {
     });
     doneButton.addEventListener("click", () => this.close());
 
-    await this.generate();
+    this.contentInnerEl.createEl("p", { text: "설정을 고른 뒤 카드 뽑기를 눌러주세요." });
   }
 
   private async generate(): Promise<void> {
@@ -119,10 +142,13 @@ export class PackModal extends Modal {
     if (this.isGenerating) return;
 
     this.isGenerating = true;
+    if (this.preferenceField) this.preferenceField.disabled = true;
+    if (this.cancelButton) this.cancelButton.hidden = false;
     this.rerollButtonEl?.setAttr("disabled", "true");
     this.rerollButtonEl?.addClass("np-pack-modal-reroll--busy");
 
     this.contentInnerEl.empty();
+    this.cardElements.forEach(card => card.destroy());
     this.cardElements = [];
     this.renderLoadingSkeleton();
     this.setStageText(t("packStageSeed"));
@@ -144,7 +170,7 @@ export class PackModal extends Modal {
       if (controller.signal.aborted) return;
       this.setStageText(t("packStageGenerating"));
 
-      this.session = await generatePack(
+      const nextSession = await generatePack(
         this.runtime,
         this.sourceCards,
         nearbyCards,
@@ -153,6 +179,8 @@ export class PackModal extends Modal {
       );
       if (controller.signal.aborted) return;
 
+      this.session = nextSession;
+      if (this.preferencePanel) this.preferencePanel.open = false;
       this.setStageText(t("packStageFinishing"));
 
       const hasRarePlus = this.session.cards.some((card) => card.rarity !== "common");
@@ -168,17 +196,18 @@ export class PackModal extends Modal {
       this.renderCards();
     } catch (error) {
       // Closing the modal cancels the request; there is nothing left to render.
-      if (controller.signal.aborted || !this.contentInnerEl) return;
+      if (this.closed || !this.contentInnerEl) return;
       this.contentInnerEl.empty();
       this.stageTextEl = null;
       const errorEl = this.contentInnerEl.createDiv({ cls: "np-pack-modal-error" });
-      errorEl.createEl("h4", { text: "Failed to generate card pack" });
+      errorEl.createEl("h4", { text: controller.signal.aborted ? "생성을 취소했습니다" : "카드를 생성하지 못했습니다" });
       errorEl.createEl("p", {
-        text: error instanceof Error ? error.message : "Unknown error",
+        text: controller.signal.aborted ? "이전 팩은 그대로 유지됩니다." : error instanceof Error ? error.message : "Unknown error",
       });
 
+      this.renderCards();
       const executionState = getActiveModelExecutionState(this.runtime.ai);
-      if (!executionState.canExecute) {
+      if (!controller.signal.aborted && !executionState.canExecute) {
         errorEl.createEl("p", {
           cls: "np-pack-modal-error-hint",
           text: executionState.message || t("noApiKey"),
@@ -186,7 +215,15 @@ export class PackModal extends Modal {
       }
     } finally {
       if (this.generationController === controller) this.generationController = null;
+      if (!this.closed && controller.signal.aborted && this.stageTextEl) {
+        this.contentInnerEl?.empty(); this.stageTextEl = null;
+        this.contentInnerEl?.createEl("p", { text: "생성을 취소했습니다. 이전 팩은 유지됩니다." });
+        this.renderCards();
+      }
       this.isGenerating = false;
+      if (this.preferenceField) this.preferenceField.disabled = false;
+      if (this.cancelButton) this.cancelButton.hidden = true;
+      if (this.session) this.rerollButtonEl?.setText("다시 뽑기");
       this.rerollButtonEl?.removeAttribute("disabled");
       this.rerollButtonEl?.removeClass("np-pack-modal-reroll--busy");
     }
@@ -222,9 +259,11 @@ export class PackModal extends Modal {
     if (!this.session || !this.contentInnerEl) return;
 
     const infoEl = this.contentInnerEl.createDiv({ cls: "np-pack-modal-info" });
-    infoEl.createSpan({ text: `Seed: ${this.session.seed}` });
-    infoEl.createSpan({ text: `Exploration: ${this.session.exploration ?? this.session.risk}` });
-    infoEl.createSpan({ text: `Pity: ${this.store.pityCounter}` });
+    infoEl.createSpan({ text: `${this.session.cards.length}장의 글감` });
+    if (this.session.generationSettings) {
+      const settings = this.session.generationSettings;
+      infoEl.createSpan({ text: `${DOMAINS[settings.domain]} · ${settings.promptMode === "custom" ? "사용자 난도 프롬프트" : `난도 ${settings.difficulty}`}` });
+    }
 
     const grid = this.contentInnerEl.createDiv({ cls: "np-pack-modal-grid" });
     this.session.cards.forEach((card, index) => {
@@ -235,6 +274,8 @@ export class PackModal extends Modal {
       );
       cardEl.el.classList.add("np-pack-card--entering");
       cardEl.el.style.animationDelay = `${index * 80}ms`;
+      if (this.session!.keptIds.includes(card.id)) cardEl.markKept();
+      else if (this.session!.discardedIds.includes(card.id)) cardEl.markDiscarded();
       this.cardElements.push(cardEl);
       grid.appendChild(cardEl.el);
     });
@@ -246,12 +287,13 @@ export class PackModal extends Modal {
     const card = this.session.cards.find((item) => item.id === cardId);
     if (!card) return;
 
+    if (this.session.keptIds.includes(cardId) || this.session.discardedIds.includes(cardId)) return;
     if (!this.session.keptIds.includes(cardId)) {
       this.session.keptIds.push(cardId);
     }
 
     const cardEl = this.cardElements.find(
-      (element) => element.el.querySelector(".np-pack-card-name")?.textContent === card.card_name,
+      (element) => element.cardId === cardId,
     );
     if (cardEl) cardEl.markKept();
 
@@ -262,13 +304,14 @@ export class PackModal extends Modal {
   private handleDiscard(cardId: number): void {
     if (!this.session) return;
 
+    if (this.session.keptIds.includes(cardId) || this.session.discardedIds.includes(cardId)) return;
     if (!this.session.discardedIds.includes(cardId)) {
       this.session.discardedIds.push(cardId);
     }
 
     const card = this.session.cards.find((item) => item.id === cardId);
     const cardEl = this.cardElements.find(
-      (element) => element.el.querySelector(".np-pack-card-name")?.textContent === card?.card_name,
+      (element) => element.cardId === cardId,
     );
     if (cardEl) cardEl.markDiscarded();
 
@@ -283,6 +326,7 @@ export class PackModal extends Modal {
   }
 
   onClose(): void {
+    this.closed = true;
     this.generationController?.abort();
     this.generationController = null;
     this.cardElements.forEach((cardEl) => cardEl.destroy());

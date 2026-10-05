@@ -109,6 +109,29 @@ function fakeDesktop(state = {}) {
 
 const claudeRequest = { model: 'sonnet', effort: 'medium', systemPrompt: 'S', prompt: 'P' };
 
+test('explicit schema passes through native runtime with long prompt file and cleanup', async () => {
+  const schema = { type:'object', properties:{answer:{type:'integer'}}, required:['answer'], additionalProperties:false };
+  const desktop = fakeDesktop({claudeEvents:[INIT,{...RESULT,result:'explanation',structured_output:{answer:42}}]});
+  assert.equal(await desktop.service.completeWithClaude({...claudeRequest,systemPrompt:'S'.repeat(25000),jsonSchema:schema}),'{"answer":42}');
+  const call=desktop.calls.find(c=>c.args[0]==='-p');
+  assert.deepEqual(JSON.parse(call.args[call.args.indexOf('--json-schema')+1]),schema);
+  assert.ok(call.args.includes('--system-prompt-file'));
+  assert.equal(desktop.written.get(`removed:${call.cwd}`),true);
+});
+
+test('max effort has a bounded ten-minute allowance while other efforts retain five minutes and cancellation', async () => {
+  const desktop = fakeDesktop();
+  for (const effort of [undefined, 'low', 'medium', 'high', 'xhigh', 'max']) {
+    const controller = new AbortController();
+    await desktop.service.completeWithClaude({ ...claudeRequest, effort, signal: controller.signal });
+    const request = desktop.calls.filter(call => call.args[0] === '-p').at(-1);
+    assert.equal(request.timeoutMs, effort === 'max' ? 600_000 : 300_000, `bounded timeout for ${effort}`);
+  }
+  const cancelled = new AbortController(); cancelled.abort();
+  await assert.rejects(desktop.service.completeWithClaude({ ...claudeRequest, effort:'max', signal:cancelled.signal }), /aborted/i);
+  assert.equal(desktop.calls.filter(call => call.args[0] === '-p').at(-1).signal.aborted, true);
+});
+
 test('a missing CLI is reported as not installed', async () => {
   const desktop = fakeDesktop({ files: [] });
   const snapshot = await desktop.service.diagnose('claude');

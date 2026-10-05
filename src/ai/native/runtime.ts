@@ -20,6 +20,9 @@ import type {
 } from "./types.ts";
 
 const REQUEST_TIMEOUT_MS = 5 * 60_000;
+// Max reasoning exceeded five minutes in the fixed cross-model QA. Keep a
+// bounded allowance for that explicit choice; cancellation remains live.
+const MAX_EFFORT_TIMEOUT_MS = 10 * 60_000;
 const CHECK_TIMEOUT_MS = 30_000;
 const VERIFY_CACHE_MS = 60_000;
 const LONG_SYSTEM_PROMPT_CHARS = 12_000;
@@ -151,6 +154,8 @@ export class NativeRuntimeService {
     systemPrompt: string;
     prompt: string;
     signal?: AbortSignal;
+    onTextDelta?: (delta: string) => void;
+    jsonSchema?: Record<string, unknown>;
   }): Promise<string> {
     const runtime = await this.ensureAllowed("claude", request.signal);
     assertClaudeVersionSupportsModel(request.model, runtime.version);
@@ -169,10 +174,12 @@ export class NativeRuntimeService {
         effort: request.effort,
         systemPrompt: request.systemPrompt,
         systemPromptFile,
+        jsonSchema: request.jsonSchema,
         prompt: request.prompt,
         guard: { organization: runtime.decision.code === "organization-subscription" },
+        onTextDelta: request.onTextDelta,
         signal: request.signal,
-        timeoutMs: REQUEST_TIMEOUT_MS,
+        timeoutMs: request.effort === "max" ? MAX_EFFORT_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
       });
       return result.content;
     } finally {

@@ -3,6 +3,7 @@
 // (R-024 headless protocol, R-044 session guard).
 
 import type { NativeProcessRunner } from "./types.ts";
+import { parseUniqueJson } from "../structured-output.ts";
 
 export type ClaudeEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -23,6 +24,7 @@ export function buildClaudeArgs(params: {
   effort?: ClaudeEffort;
   systemPrompt?: string;
   systemPromptFile?: string;
+  jsonSchema?: Record<string, unknown>;
 }): string[] {
   const args = [
     "-p",
@@ -31,6 +33,7 @@ export function buildClaudeArgs(params: {
     "--verbose",
     "--output-format",
     "stream-json",
+    "--include-partial-messages",
     "--no-session-persistence",
     "--safe-mode",
     "--permission-mode",
@@ -49,6 +52,7 @@ export function buildClaudeArgs(params: {
     args.push("--system-prompt", params.systemPrompt ?? "");
   }
   if (params.effort) args.push("--effort", params.effort);
+  if (params.jsonSchema) args.push("--json-schema", JSON.stringify(params.jsonSchema));
   return args;
 }
 
@@ -77,12 +81,17 @@ export function evaluateClaudeInitEvent(event: Record<string, unknown>, guard: C
 }
 
 export interface ClaudeStreamParse {
+  delta?: string;
   text?: string;
   finalText?: string;
   error?: string;
 }
 
 export function parseClaudeStreamEvent(event: Record<string, unknown>): ClaudeStreamParse {
+  if (event.type === "stream_event") {
+    const partial = asRecord(event.event), delta = asRecord(partial?.delta);
+    return partial?.type === "content_block_delta" && delta?.type === "text_delta" && typeof delta.text === "string" ? { delta: delta.text } : {};
+  }
   if (event.type === "assistant") {
     const message = asRecord(event.message);
     const content = Array.isArray(message?.content) ? message.content : [];
@@ -117,9 +126,11 @@ export async function runClaudeOnce(
     effort?: ClaudeEffort;
     systemPrompt: string;
     systemPromptFile?: string;
+    jsonSchema?: Record<string, unknown>;
     prompt: string;
     guard: ClaudeSessionGuard;
     signal?: AbortSignal;
+    onTextDelta?: (delta: string) => void;
     timeoutMs: number;
   },
 ): Promise<{ content: string; resolvedModel?: string }> {
@@ -128,7 +139,9 @@ export async function runClaudeOnce(
   let resolvedModel: string | undefined;
   let finalText: string | undefined;
   let assistantText = "";
+  let streamedText = "";
   let requestError: string | undefined;
+  let structuredText: string | undefined;
 
   // A separate controller lets the session guard stop the process without the
   // stop being reported as a user cancellation.
@@ -147,6 +160,7 @@ export async function runClaudeOnce(
           effort: request.effort,
           systemPrompt: request.systemPrompt,
           systemPromptFile: request.systemPromptFile,
+          jsonSchema: request.jsonSchema,
         }),
         cwd: request.cwd,
         env: request.env,
@@ -155,7 +169,15 @@ export async function runClaudeOnce(
         timeoutMs: request.timeoutMs,
         onStdoutLine: (line) => {
           if (violation) return;
-          const event = parseJsonLine(line);
+          let event: Record<string, unknown> | null;
+          try {
+            event = request.jsonSchema && line.trimStart().startsWith("{")
+              ? asRecord(parseUniqueJson(line)) : parseJsonLine(line);
+          } catch {
+            requestError = "Invalid or duplicate-key structured Claude event.";
+            controller.abort();
+            return;
+          }
           if (!event) return;
           if (event.type === "system" && event.subtype === "init") {
             sawInit = true;
@@ -165,13 +187,20 @@ export async function runClaudeOnce(
             return;
           }
           const parsed = parseClaudeStreamEvent(event);
+          if (parsed.delta && !request.jsonSchema) { streamedText += parsed.delta; request.onTextDelta?.(parsed.delta); }
           if (parsed.text) assistantText += parsed.text;
           if (parsed.finalText !== undefined) finalText = parsed.finalText;
           if (parsed.error) requestError = parsed.error;
+          if (request.jsonSchema && event.type === "result" && !parsed.error) {
+            const structured = asRecord(event.structured_output);
+            if (event.subtype !== "success" || !structured) requestError = "Claude completed without a structured object result.";
+            else structuredText = JSON.stringify(structured);
+          }
         },
       });
     } catch (error) {
       if (violation) throw new ClaudePlanRequestBlockedError(violation);
+      if (requestError) throw new Error(requestError);
       throw error;
     }
 
@@ -188,7 +217,8 @@ export async function runClaudeOnce(
       const detail = (result.stderr.trim() || result.stdout.trim()).split(/\r?\n/).slice(-3).join(" ").slice(0, 400);
       throw new Error(detail || "Claude Code failed. Open NotePack settings and check the Claude Plan connection.");
     }
-    const content = (finalText ?? assistantText).trim();
+    if (request.jsonSchema && structuredText === undefined) throw new Error("Claude completed without a structured object result.");
+    const content = (request.jsonSchema ? structuredText! : (finalText ?? (assistantText || streamedText))).trim();
     if (!content) throw new Error("Claude Code completed without returning an answer.");
     return { content, resolvedModel };
   } finally {

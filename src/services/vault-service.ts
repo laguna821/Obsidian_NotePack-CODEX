@@ -1,3 +1,4 @@
+import { buildObsidianTemplate } from "../ai/notepack-engine";
 import { type App, normalizePath } from "obsidian";
 import { getPrimaryAnnotation } from "../data/annotations";
 import type { PackCard, WorkbenchCard } from "../types";
@@ -10,6 +11,11 @@ export class VaultService {
   }
 
   async promoteCard(card: WorkbenchCard, folder: string, author?: string): Promise<string> {
+    if (card.packCard) {
+      const pack = { ...card.packCard, card_name: card.title || card.packCard.card_name, main_question: card.text };
+      pack.obsidian_template = buildObsidianTemplate(pack, pack.rarity, card.sourcePackId || "kept-pack");
+      return this.promotePackCard(pack, card, folder, author);
+    }
     const folderPath = normalizePath(folder);
     await this.ensureFolder(folderPath);
 

@@ -77,16 +77,16 @@ export type Rarity = "common" | "rare" | "epic" | "legendary";
 
 export const RARITY_LABELS: Record<Rarity, string> = {
   common: "기본",
-  rare: "주목",
-  epic: "핵심",
-  legendary: "원형",
+  rare: "희귀",
+  epic: "영웅",
+  legendary: "전설",
 };
 
 export const RARITY_EFFECT_TEXT: Record<Rarity, string> = {
   common: "기본 카드",
-  rare: "✨ 주목 카드",
-  epic: "💡 핵심 카드",
-  legendary: "🌟 원형 카드",
+  rare: "✨ 희귀 카드",
+  epic: "💡 영웅 카드",
+  legendary: "🌟 전설 카드",
 };
 
 export const RARITY_COLORS: Record<Rarity, string> = {
@@ -190,6 +190,7 @@ export interface WorkbenchCard {
 
   // Pack origin (for growth cards)
   sourcePackId?: string;
+  packCard?: PackCard;
   sourceCardId?: string;
   sourceCardIds?: string[];
   rarity?: Rarity;
@@ -218,6 +219,7 @@ export interface WorkbenchCard {
 // ── Pack Card (generated in modal) ─────────────────────────────────────────
 
 export interface PackCard {
+  generationSettings?: import("./ai/pack-preferences").PackPreferences;
   id: number;
   rarity: Rarity;
   effect_text: string;
@@ -253,6 +255,8 @@ export interface PackSession {
   style: string;
   weights: { common: number; rare: number; epic: number; legendary: number };
   cards: PackCard[];
+  generationSettings?: import("./ai/pack-preferences").PackPreferences;
+  generationMs?: number;
   keptIds: number[];
   discardedIds: number[];
 }
@@ -393,6 +397,7 @@ export interface AISettings {
   packPityEnabled: boolean;
   promotionFolder: string;
   noteAuthor: string;
+  packPreferences?: import("./ai/pack-preferences").PackPreferences;
   customPackDifficultyPrompt: string;
   customSynthesisPrompt: string;
   uiLanguage: "ko" | "en";

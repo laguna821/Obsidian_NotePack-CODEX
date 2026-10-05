@@ -31,7 +31,7 @@ test('buildOpenAIPlanCodexRequestBody maps system messages to instructions and t
     response_format: {
       type: 'json_schema',
       json_schema: {
-        name: 'Card Output',
+        name: 'Card_Output',
         schema: {
           type: 'object',
           properties: {
@@ -49,7 +49,10 @@ test('buildOpenAIPlanCodexRequestBody maps system messages to instructions and t
   assert.equal(body.store, false);
   assert.equal(body.stream, true);
   assert.equal(body.temperature, undefined);
-  assert.equal(body.text, undefined);
+  assert.equal(body.text.format.name, 'Card_Output');
+  assert.equal(body.text.format.type, 'json_schema');
+  assert.equal(body.text.format.strict, true);
+  assert.deepEqual(body.text.format.schema.required, ['title']);
   assert.deepEqual(body.input, [
     {
       role: 'user',

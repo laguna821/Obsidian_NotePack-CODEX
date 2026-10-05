@@ -15,6 +15,20 @@ export interface ChatCompletionOptions {
   response_format?: Record<string, unknown>;
   web_search_options?: Record<string, unknown>;
   signal?: AbortSignal;
+  /** Public answer text only; thinking/reasoning blocks must never be emitted. */
+  onTextDelta?: (delta: string) => void;
+}
+
+/** Gemini 3 uses levels; earlier Gemini models retain their token budget. */
+export function geminiThinkingConfig(model: string, thinking?: AIThinkingConfig): Record<string, unknown> | undefined {
+  if (!thinking?.enabled) return undefined;
+  if (thinking.effort !== undefined) {
+    if (!/^gemini-3(?:[.-]|$)/i.test(model)) throw new Error("이 Gemini 모델은 추론 강도 대신 토큰 예산을 사용합니다.");
+    if (!["low", "medium", "high"].includes(thinking.effort)) throw new Error("Gemini 추론 강도는 low, medium, high 중에서 선택해주세요.");
+    // A persisted legacy budget may coexist in settings, but not on the wire.
+    return { thinkingLevel: thinking.effort };
+  }
+  return thinking.budget_tokens === undefined ? undefined : { thinkingBudget: thinking.budget_tokens };
 }
 
 // Reasoning models (o-series, GPT-5, GPT-6) and Claude 4.7+ (including 5.x,

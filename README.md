@@ -1,6 +1,14 @@
-# NotePack CODEX v4.0.3
+# NotePack CODEX v4.1.0
 
 <img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
+
+## 4.1.0: 원래 카드 뽑기에 설정과 편의 추가
+
+3.0.3의 등급별 생성 방식을 이어갑니다. **모델 요청 한 번으로 다섯 장**을 만들고, 질문을 먼저 보여줍니다. 분야·사고 성향·난도·등급을 고르거나 균형 / 비판·탐구 / 상상·발상 / 경험·성찰 프리셋을 선택하세요. 상세 도움말은 펼쳐 볼 수 있고, 보관 후 마크다운으로 옮겨도 함께 남습니다.
+
+사고 성향 숫자는 탐색 방향을 전달하는 상대 가중치입니다. 완성된 질문의 능력 점수나 교육 효과를 측정한 값은 아닙니다. 난도는 답을 생각하는 깊이를 조절합니다. 생성 속도와 내용은 선택 모델에 따라 달라지며, 초고속 생성이나 이론별 교육 효과를 보증하지 않습니다.
+
+[4.1.0 변경 내역](RELEASE_NOTES_4.1.0.md) · [검증 범위와 실제 출력](docs/QA_4_1.md)
 
 ## About (English)
 
@@ -14,7 +22,7 @@ Key features:
 - **Multi-seed cardpacks** — pick several notes via multi-select and draw cards that synthesize cross-seed context.
 - **Offline capture mode** — toggle AI off and just dump memos; AI catches up later.
 - **Batch AI annotation** — multi-select cards and run annotations with a concurrency-3 queue, retry-aware.
-- **Quantum metacognition cardpacks** — five rarity tiers tuned by your set grade level.
+- **Idea cardpacks** — five questions across four rarities, with selectable domains, thinking interests and difficulty.
 
 NotePack CODEX operates on `.codex` files inside your vault, kept separate from regular markdown so the AI-enriched workbench does not pollute your notes. Promote favorite cards into proper markdown notes when they are ready.
 

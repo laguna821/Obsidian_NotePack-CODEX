@@ -1,3 +1,5 @@
+import { Notice } from "obsidian";
+import { DOMAINS } from "../ai/pack-preferences";
 // ── PackCardElement: Individual Pack Card in Modal ────────────────────────
 
 import type { PackCard } from "../types";
@@ -7,6 +9,7 @@ import { t } from "../i18n";
 export class PackCardElement {
   el: HTMLElement;
   private card: PackCard;
+  get cardId(): number { return this.card.id; }
   private isExpanded = false;
   private onKeep: (cardId: number) => void;
   private onDiscard: (cardId: number) => void;
@@ -38,16 +41,6 @@ export class PackCardElement {
     });
     badge.createSpan({ text: card.effect_text });
 
-    // ── Card Name ───────────────────────────────────────────────
-
-    this.el.createEl("h4", { cls: "np-pack-card-name", text: card.card_name });
-
-    // ── Hook ────────────────────────────────────────────────────
-
-    if (card.hook) {
-      this.el.createEl("p", { cls: "np-pack-card-hook", text: card.hook });
-    }
-
     // ── Main Question ───────────────────────────────────────────
 
     this.el.createDiv({ cls: "np-pack-card-question-label", text: "🃏 메인 질문" });
@@ -66,7 +59,8 @@ export class PackCardElement {
 
     const toggleBtn = this.el.createEl("button", {
       cls: "np-pack-card-toggle",
-      text: this.isExpanded ? "▲ 접기" : "▼ 상세 보기",
+      text: this.isExpanded ? "▲ 접기" : "▼ 작성 도움 · 선택",
+      attr: { "aria-expanded": "false" },
     });
 
     const detailsEl = this.el.createDiv({
@@ -76,10 +70,15 @@ export class PackCardElement {
     toggleBtn.addEventListener("click", () => {
       this.isExpanded = !this.isExpanded;
       detailsEl.classList.toggle("np-pack-card-details--open", this.isExpanded);
-      toggleBtn.textContent = this.isExpanded ? "▲ 접기" : "▼ 상세 보기";
+      toggleBtn.setAttribute("aria-expanded", String(this.isExpanded));
+      toggleBtn.textContent = this.isExpanded ? "▲ 접기" : "▼ 작성 도움 · 선택";
     });
 
     // ── Detail Content ──────────────────────────────────────────
+
+    detailsEl.createEl("h4", { cls: "np-pack-card-name", text: card.card_name });
+    if (card.hook) detailsEl.createEl("p", { text: card.hook });
+    if (card.generationSettings) detailsEl.createEl("p", { text: "생성 설정: " + DOMAINS[card.generationSettings.domain] + " · 난도 " + card.generationSettings.difficulty });
 
     // Bridge steps
     if (card.bridge_steps.length > 0) {
@@ -126,6 +125,11 @@ export class PackCardElement {
     // ── Action Buttons ──────────────────────────────────────────
 
     const actionsEl = this.el.createDiv({ cls: "np-pack-card-actions" });
+
+    const copy = actionsEl.createEl("button", { text: "질문 복사" });
+    copy.addEventListener("click", () => {
+      void navigator.clipboard.writeText(card.main_question).then(() => new Notice("질문을 복사했습니다."), () => new Notice("복사하지 못했습니다. 질문을 선택해서 복사해주세요."));
+    });
 
     const keepBtn = actionsEl.createEl("button", {
       cls: "np-pack-card-action np-pack-card-action--keep",

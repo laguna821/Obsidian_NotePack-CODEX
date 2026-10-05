@@ -2292,12 +2292,16 @@
 }
 
 .np-pack-card--entering {
-  opacity: 0;
-  transform: translateY(8px);
+  opacity: 1;
+  transform: translateY(0);
   animation: np-pack-card-enter 350ms ease-out forwards;
 }
 
 @keyframes np-pack-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
   to {
     opacity: 1;
     transform: translateY(0);
@@ -3334,3 +3338,16 @@ body.np-is-resizing-horizontal {
 .notepack-settings-grid .notepack-settings-card .setting-item:not(.setting-item-heading) > .setting-item-control {
   flex: 1 1 100%;
 }
+
+/* Simple pack preferences: follows the active Obsidian theme. */
+.np-pack-modal button[hidden] { display: none; }
+.np-pack-preference-panel { flex: 0 0 auto; }
+.np-pack-preference-panel > summary { cursor: pointer; padding: 12px; }
+.np-pack-preference-panel[open] { max-height: 55vh; overflow-y: auto; }
+.np-pack-preference-field { min-width: 0; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); margin: 12px 0; padding: 12px; }
+.np-pack-preferences .setting-item { padding: 8px 0; }
+.np-pack-preferences details > p { color: var(--text-muted); font-size: var(--font-ui-small); }
+.np-pack-preferences summary { cursor: pointer; padding: 8px 0; }
+.np-pack-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.np-pack-preferences select { max-width: 100%; }
+@media (max-width: 600px) { .np-pack-preferences .setting-item { flex-wrap: wrap; gap: 8px; } .np-pack-preferences .setting-item-control { flex: 1 1 100%; justify-content: flex-start; } .np-pack-preferences select { width: 100%; } }

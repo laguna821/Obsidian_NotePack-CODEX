@@ -708,6 +708,7 @@ export class NotePackShell {
     const modal = new PackModal(this.app, this.store, runtime, cards, (packCard: PackCard) => {
       this.store.addCard(packCard.main_question, "growth", {
         title: packCard.card_name,
+        packCard: structuredClone(packCard),
         contentType: "question",
         category: packCard.card_name,
         annotation: packCard.hook,
@@ -718,7 +719,7 @@ export class NotePackShell {
         questionType: packCard.questionType,
         lens: packCard.lens,
       });
-    });
+    }, packPreferences => this.plugin.settingsStore.updateSettings({ ...this.plugin.settingsStore.settings, packPreferences }));
 
     modal.open();
   }

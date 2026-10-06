@@ -4,6 +4,7 @@ import { Composer } from "../components/Composer";
 import { ComposerExpandModal } from "../components/ComposerExpandModal";
 import { Inspector, type InspectorActions } from "../components/Inspector";
 import { PackModal } from "../components/PackModal";
+import { generateCardGuidance } from "../ai/notepack-engine";
 import { detectContentType } from "../ai/detect-content-type";
 import { enrichCardAnnotations, getActiveAnnotationAgents, type EnrichContext } from "../ai/enrich";
 import { generateSynthesis, shouldGenerateSynthesis } from "../ai/synthesis";
@@ -589,6 +590,17 @@ export class NotePackShell {
 
   private buildInspectorActions(): InspectorActions {
     return {
+      onGenerateGuidance: async (cardId, signal) => {
+        const card = this.store.getCard(cardId);
+        if (!card?.packCard) throw new Error("글감 카드를 찾을 수 없습니다.");
+        const question = card.text;
+        const next = await generateCardGuidance(this.getRuntimeSettings(), { ...card.packCard, main_question: question }, signal);
+        signal.throwIfAborted();
+        if (this.store.getCard(cardId)?.text !== question) throw new Error("질문이 편집되어 작성 도움을 저장하지 않았습니다.");
+        this.store.updateCard(cardId, { packCard: next });
+        if (card.sourcePackId) this.store.updatePackGuidance(card.sourcePackId, next.id, question, next);
+        return next;
+      },
       onDrawPack: (cardId) => this.openPackModal(cardId),
       onPromote: (cardId) => {
         void this.promoteCard(cardId);
@@ -705,10 +717,11 @@ export class NotePackShell {
     }
 
     const sourceCardIds = cards.length > 1 ? cards.map((c) => c.id) : undefined;
-    const modal = new PackModal(this.app, this.store, runtime, cards, (packCard: PackCard) => {
+    const modal = new PackModal(this.app, this.store, runtime, cards, (packCard: PackCard, packId: string) => {
       this.store.addCard(packCard.main_question, "growth", {
         title: packCard.card_name,
         packCard: structuredClone(packCard),
+        sourcePackId: packId,
         contentType: "question",
         category: packCard.card_name,
         annotation: packCard.hook,

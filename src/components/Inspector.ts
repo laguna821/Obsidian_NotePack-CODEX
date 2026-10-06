@@ -1,5 +1,6 @@
 import { Component, MarkdownRenderer, type App } from "obsidian";
-import type { WorkbenchCard } from "../types";
+import type { WorkbenchCard, PackCard } from "../types";
+import { CardGuidance } from "./CardGuidance";
 import { CONTENT_TYPE_LABELS, RARITY_COLORS, RARITY_LABELS } from "../types";
 import { getPrimaryAnnotation, getVisibleAnnotations } from "../data/annotations";
 import { t } from "../i18n";
@@ -11,6 +12,7 @@ export interface DrawPackState {
 }
 
 export interface InspectorActions {
+  onGenerateGuidance?: (cardId: string, signal: AbortSignal) => Promise<PackCard>;
   onDrawPack: (cardId: string) => void;
   onPromote: (cardId: string) => void;
   onArchive: (cardId: string) => void;
@@ -26,6 +28,7 @@ export interface InspectorActions {
 }
 
 export class Inspector {
+  private guidance: CardGuidance | null = null;
   containerEl: HTMLElement;
   private app: App;
   private card: WorkbenchCard | null = null;
@@ -45,6 +48,8 @@ export class Inspector {
   }
 
   private renderEmpty(): void {
+    this.guidance?.destroy();
+    this.guidance = null;
     this.containerEl.empty();
     this.containerEl.createDiv({
       cls: "np-inspector-empty",
@@ -68,6 +73,8 @@ export class Inspector {
   }
 
   private renderCard(): void {
+    this.guidance?.destroy();
+    this.guidance = null;
     const card = this.card!;
     const drawPackState = this.actions.getDrawPackState(card);
 
@@ -88,6 +95,13 @@ export class Inspector {
     }
 
     this.renderTextSection(card);
+    if (card.packCard) {
+      if (card.packCard.guidanceStatus === "ready" && card.packCard.main_question !== card.text) {
+        this.containerEl.createEl("p", { text: "아래 작성 도움은 편집 전 질문을 기준으로 만들어졌습니다." });
+      }
+      this.guidance = new CardGuidance(this.containerEl.createDiv(), card.packCard,
+        this.actions.onGenerateGuidance ? signal => this.actions.onGenerateGuidance!(card.id, signal) : undefined);
+    }
     this.renderEnrichmentSection(card);
 
     if (card.status === "enriching") {
@@ -468,6 +482,7 @@ export class Inspector {
   }
 
   destroy(): void {
+    this.guidance?.destroy();
     this.editor?.destroy();
     this.editor = null;
     this.markdownComponent.unload();

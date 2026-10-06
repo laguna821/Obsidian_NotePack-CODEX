@@ -295,7 +295,7 @@ Return ONLY a valid JSON object with the "cards" array.`;
   const result = await chatCompletion(config, {
     model: config.modelId,
     messages: [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: preferences.questionFirst ? systemPrompt + QUESTION_FIRST_OUTPUT : systemPrompt },
       { role: "user", content: userMessage },
     ],
     temperature: 0.7 + risk * 0.03,
@@ -304,7 +304,9 @@ Return ONLY a valid JSON object with the "cards" array.`;
   });
 
   signal?.throwIfAborted();
-  const parsedCards = parsePackResponse(result.content, rarities, seed);
+  const parsedCards = preferences.questionFirst
+    ? parseQuestionFirstResponse(result.content, rarities, seed, targetLanguage)
+    : parsePackResponse(result.content, rarities, seed);
   for (const card of parsedCards) card.generationSettings = structuredClone(preferences);
 
   const session: PackSession = {
@@ -329,6 +331,67 @@ Return ONLY a valid JSON object with the "cards" array.`;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+// Keep the full-pack prompt unchanged when this option is off. Rarity engines
+// still guide the question; only the requested public output changes.
+const QUESTION_FIRST_OUTPUT = `
+
+## Question-first output — replaces all support/output field requirements above
+Generate the same thoughtful, standalone questions using the rarity engines above.
+For this request return ONLY {"cards":[...]} with five objects containing exactly:
+id, card_name, main_question, questionType, lens.
+Writing support will be requested separately if the reader wants it. Do not output
+hook, bridge_steps, write_now, followups, failure_signal, tags, links, or explanations.
+Do not squeeze the omitted support into main_question. Preserve the question's depth
+and make it immediately understandable on its own.`;
+
+function parseQuestionFirstResponse(content: string, rarities: Rarity[], seed: string, language: string): PackCard[] {
+  let parsed: unknown;
+  try { parsed = JSON.parse(extractJsonCandidate(content) ?? content); }
+  catch { throw new Error("카드 응답을 읽지 못했습니다. 이전 팩은 유지됩니다."); }
+  const cards = asRecord(parsed)?.cards;
+  if (!Array.isArray(cards)) throw new Error("카드 목록이 없습니다. 이전 팩은 유지됩니다.");
+  const completeShape = cards.map(value => ({ ...asRecord(value), hook: "", bridge_steps: [], write_now: [], followups: [], suggested_tags: [], suggested_links: [], failure_signal: "" }));
+  return parsePackResponse(JSON.stringify({ cards: completeShape }), rarities, seed).map(card => ({
+    ...card, guidanceStatus: "pending", guidanceLanguage: language,
+  }));
+}
+
+/** One explicit request. Return new data only; never rewrite the existing question. */
+export async function generateCardGuidance(runtime: EffectiveWorkbenchRuntimeSettings, card: PackCard, signal?: AbortSignal): Promise<PackCard> {
+  signal?.throwIfAborted();
+  if (card.guidanceStatus !== "pending") return card;
+  const config = buildAIConfig(runtime.ai);
+  if (!config) throw new Error("No API key configured");
+  const started = Date.now();
+  const language = card.guidanceLanguage || (/\p{Script=Hangul}/u.test(card.main_question) ? "Korean" : "English");
+  const result = await chatCompletion(config, {
+    model: config.modelId,
+    messages: [{ role: "system", content: `Provide optional writing support for the fixed question supplied as data. Do not answer it for the reader or rewrite it. Do not invent the reader's experiences, facts, citations, or an absent source note. Clearly mark imagined examples. Use ${language}.
+Return one JSON object with ONLY hook (string), bridge_steps (array of 2-4 strings), write_now (array of 3-5 practical steps), followups (array of 3 questions), suggested_tags (array of #tags), suggested_links (array of [[NEW: title]] strings), failure_signal (string).
+Support the actual question and its rarity without forcing a prescribed conclusion. Keep the support concise.` },
+    { role: "user", content: JSON.stringify({ main_question: card.main_question, card_name: card.card_name, rarity: card.rarity, questionType: card.questionType, lens: card.lens }) }],
+    response_format: { type: "json_object" }, signal,
+  });
+  signal?.throwIfAborted();
+  let data: Record<string, unknown> | undefined;
+  try { data = asRecord(JSON.parse(extractJsonCandidate(result.content) ?? result.content)); }
+  catch { throw new Error("작성 도움 응답을 읽지 못했습니다. 질문은 그대로 유지됩니다."); }
+  if (!data || typeof data.hook !== "string" || typeof data.failure_signal !== "string") throw new Error("작성 도움 형식이 올바르지 않습니다.");
+  const fields = ["bridge_steps", "write_now", "followups", "suggested_tags", "suggested_links"] as const;
+  for (const field of fields) {
+    if (!Array.isArray(data[field]) || !(data[field] as unknown[]).every(v => typeof v === "string")) throw new Error("작성 도움 형식이 올바르지 않습니다.");
+  }
+  if (!(data.write_now as string[]).some(text => text.trim())) throw new Error("작성 도움이 비어 있습니다.");
+  const next: PackCard = { ...card, guidanceStatus: "ready", guidanceMs: Date.now() - started,
+    hook: data.hook, failure_signal: data.failure_signal,
+    bridge_steps: data.bridge_steps as string[], write_now: data.write_now as string[], followups: data.followups as string[],
+    suggested_tags: data.suggested_tags as string[], suggested_links: data.suggested_links as string[],
+  };
+  const seed = card.obsidian_template.match(/^seed: (.*)$/m)?.[1] || "";
+  next.obsidian_template = buildObsidianTemplate(next, card.rarity, seed);
+  return next;
+}
 
 function buildSourceContext(sources: WorkbenchCard[], nearby: WorkbenchCard[]): string {
   if (sources.length === 1) {

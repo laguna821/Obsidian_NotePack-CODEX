@@ -1,7 +1,7 @@
 import { renderPackPreferences } from "./PackPreferenceControls";
 import { DOMAINS, normalizePackPreferences, type PackPreferences } from "../ai/pack-preferences";
 import { Modal, Notice, type App } from "obsidian";
-import { generatePack } from "../ai/notepack-engine";
+import { generatePack, generateCardGuidance } from "../ai/notepack-engine";
 import { getActiveModelExecutionState } from "../ai/settings-registry";
 import {
   getOutputLanguageModeLabel,
@@ -20,7 +20,7 @@ export class PackModal extends Modal {
   private readonly runtime: EffectiveWorkbenchRuntimeSettings;
   private readonly sourceCards: WorkbenchCard[];
   private readonly onPreferencesSave?: (preferences: PackPreferences) => void;
-  private readonly onKeepCard: (packCard: PackCard) => void;
+  private readonly onKeepCard: (packCard: PackCard, packId: string) => void;
 
   private session: PackSession | null = null;
   private closed = false;
@@ -39,7 +39,7 @@ export class PackModal extends Modal {
     store: WorkbenchDocumentStore,
     runtime: EffectiveWorkbenchRuntimeSettings,
     sourceCards: WorkbenchCard[],
-    onKeepCard: (packCard: PackCard) => void,
+    onKeepCard: (packCard: PackCard, packId: string) => void,
     onPreferencesSave?: (preferences: PackPreferences) => void,
   ) {
     super(app);
@@ -271,6 +271,14 @@ export class PackModal extends Modal {
         card,
         (cardId) => this.handleKeep(cardId),
         (cardId) => this.handleDiscard(cardId),
+        async signal => {
+          const session = this.session!;
+          const next = await generateCardGuidance(this.runtime, card, signal);
+          signal.throwIfAborted();
+          if (this.closed || this.session !== session) throw new Error("팩이 변경되어 도움 생성을 중단했습니다.");
+          this.store.updatePackGuidance(session.packId, card.id, card.main_question, next);
+          return next;
+        },
       );
       cardEl.el.classList.add("np-pack-card--entering");
       cardEl.el.style.animationDelay = `${index * 80}ms`;
@@ -297,7 +305,7 @@ export class PackModal extends Modal {
     );
     if (cardEl) cardEl.markKept();
 
-    this.onKeepCard(card);
+    this.onKeepCard(card, this.session.packId);
     new Notice(`Kept "${card.card_name}"`);
   }
 

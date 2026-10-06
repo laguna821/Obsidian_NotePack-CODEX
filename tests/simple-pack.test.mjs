@@ -12,7 +12,7 @@ const bundle = await build({ entryPoints:['src/ai/notepack-engine.ts'], bundle:t
   b.onLoad({filter:/.*/,namespace:'stub'},()=>({contents:'export const buildAIConfig=()=>({modelId:"test"}); export const chatCompletion=(config,options)=>globalThis.__simplePackReply(options);'}));
 }}] });
 const mod={exports:{}}; new Function('module','exports','require',bundle.outputFiles[0].text)(mod,mod.exports,createRequire(import.meta.url));
-const {generatePack,parsePackResponse,buildObsidianTemplate}=mod.exports;
+const {generatePack,generateCardGuidance,parsePackResponse,buildObsidianTemplate}=mod.exports;
 const raw=()=>Array.from({length:5},(_,i)=>({id:i+1,card_name:'카드 '+(i+1),main_question:'질문 '+(i+1)+'?',bridge_steps:[],write_now:['시작해보기'],followups:[],suggested_tags:['#생각'],suggested_links:['[[NEW: 생각]]']}));
 const runtime=()=>({ai:normalizeAISettings({packPreferences:normalizePackPreferences({rarity:'legendary',difficulty:5,domain:'philosophy'})}),packExploration:2,packLanguageMode:'auto-source',customPackDifficultyPrompt:''});
 const source=[{id:'s1',title:'카페 공부',text:'카페에서 공부하는 걸 좋아한다.',status:'ready'}];
@@ -68,4 +68,55 @@ test('kept card guidance survives document serialization and edited question exp
   assert.deepEqual(doc.cards[0].packCard.write_now,['시작해보기']);
   const template=buildObsidianTemplate({...doc.cards[0].packCard,main_question:doc.cards[0].text},'common','seed');
   assert.match(template,/수정한 질문/); assert.match(template,/시작해보기/); assert.match(template,/"#생각"/);
+});
+
+test('question-first is opt-in and survives settings normalization and presets',()=>{
+  assert.equal(normalizePackPreferences().questionFirst,false);
+  const p=normalizePackPreferences({questionFirst:true});
+  assert.equal(normalizeAISettings({packPreferences:p}).packPreferences.questionFirst,true);
+  assert.equal(applyPackPreset(p,'creative').questionFirst,true);
+});
+
+test('question-first returns five usable cards without requesting support automatically',async()=>{
+  let calls=0;globalThis.__simplePackReply=async()=>{calls++;return{content:JSON.stringify({cards:raw().map(({id,card_name,main_question})=>({id,card_name,main_question}))})};};
+  const r=runtime();r.ai.packPreferences.questionFirst=true;
+  const pack=await generatePack(r,source,[],0);
+  assert.equal(calls,1);assert.equal(pack.cards.length,5);
+  assert(pack.cards.every(c=>c.guidanceStatus==='pending'&&c.write_now.length===0&&c.main_question));
+  const store=new WorkbenchDocumentStore(createEmptyCodexDocument('Deferred'));
+  store.addCard(pack.cards[0].main_question,'growth',{packCard:pack.cards[0],status:'ready'});
+  const reopened=parseCodexDocument(serializeCodexDocument(store.document));
+  assert.equal(reopened.cards[0].packCard.guidanceStatus,'pending');
+  assert.equal(reopened.cards[0].packCard.guidanceLanguage,'Korean');
+});
+
+test('deferred support cannot replace question or metadata, caches ready data, and abort leaves pending intact',async()=>{
+  const card={...parsePackResponse(JSON.stringify({cards:raw()}),Array(5).fill('legendary'),'seed')[0],guidanceStatus:'pending',guidanceLanguage:'Korean'};
+  let calls=0;globalThis.__simplePackReply=async()=>{calls++;return{content:JSON.stringify({...raw()[0],hook:'선택 도움',failure_signal:'반례',main_question:'바꾼 질문',id:77,rarity:'common'})};};
+  const ready=await generateCardGuidance(runtime(),card);
+  assert.equal(ready.main_question,card.main_question);assert.equal(ready.id,card.id);assert.equal(ready.rarity,card.rarity);
+  assert.equal(card.guidanceStatus,'pending');assert.equal(ready.guidanceStatus,'ready');
+  assert.match(ready.obsidian_template,/seed: seed/);
+  assert.equal(await generateCardGuidance(runtime(),ready),ready);assert.equal(calls,1);
+  const ac=new AbortController();globalThis.__simplePackReply=async()=>{ac.abort();return{content:'{}'};};
+  await assert.rejects(generateCardGuidance(runtime(),card,ac.signal));assert.equal(card.guidanceStatus,'pending');
+  globalThis.__simplePackReply=async()=>({content:JSON.stringify({hook:'',failure_signal:'',write_now:'wrong'})});
+  await assert.rejects(generateCardGuidance(runtime(),card));assert.equal(card.main_question,raw()[0].main_question);
+});
+
+test('support updates the matching pack and kept card, but preserves an edited question and other packs',()=>{
+  const store=new WorkbenchDocumentStore(createEmptyCodexDocument('Support'));
+  const card={...parsePackResponse(JSON.stringify({cards:raw()}),Array(5).fill('common'),'seed')[0],guidanceStatus:'pending'};
+  store.addPackSession({packId:'p1',cards:[card],keptIds:[],discardedIds:[]});
+  const saved=store.addCard(card.main_question,'growth',{sourcePackId:'p1',packCard:structuredClone(card)});
+  const edited=store.addCard('편집한 질문','growth',{sourcePackId:'p1',packCard:structuredClone(card)});
+  const other=store.addCard(card.main_question,'growth',{sourcePackId:'p2',packCard:structuredClone(card)});
+  const ready={...card,guidanceStatus:'ready',write_now:['질문을 바꾸지 않는 도움']};
+  store.updatePackGuidance('p1',card.id,card.main_question,ready);
+  const doc=parseCodexDocument(serializeCodexDocument(store.document));
+  assert.equal(doc.packHistory[0].cards[0].guidanceStatus,'ready');
+  assert.equal(doc.cards.find(c=>c.id===saved.id).packCard.guidanceStatus,'ready');
+  assert.equal(doc.cards.find(c=>c.id===edited.id).packCard.guidanceStatus,'pending');
+  assert.equal(doc.cards.find(c=>c.id===other.id).packCard.guidanceStatus,'pending');
+  assert.throws(()=>store.updatePackGuidance('p1',card.id,card.main_question,{...ready,main_question:'다른 질문'}));
 });

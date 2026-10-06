@@ -219,6 +219,9 @@ export interface WorkbenchCard {
 // ── Pack Card (generated in modal) ─────────────────────────────────────────
 
 export interface PackCard {
+  guidanceStatus?: "pending" | "ready";
+  guidanceLanguage?: string;
+  guidanceMs?: number;
   generationSettings?: import("./ai/pack-preferences").PackPreferences;
   id: number;
   rarity: Rarity;

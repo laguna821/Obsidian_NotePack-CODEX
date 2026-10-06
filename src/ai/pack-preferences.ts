@@ -11,6 +11,7 @@ export interface PackPreferences {
   rarity: Rarity | "auto";
   weights: Record<ThinkingPreference, number>;
   promptMode: "guided" | "custom";
+  questionFirst: boolean;
 }
 const equalWeights = () => Object.fromEntries(Object.keys(AXES).map(k => [k, 1])) as PackPreferences["weights"];
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -30,6 +31,7 @@ export function normalizePackPreferences(value?: unknown, legacySettings?: unkno
     domain: typeof domain === "string" && Object.hasOwn(DOMAINS, domain) ? domain as PackDomain : "mixed",
     rarity: ["common", "rare", "epic", "legendary"].includes(String(rarity)) ? rarity as Rarity : "auto",
     weights: normalized,
+    questionFirst: input.questionFirst === true,
     promptMode: input.promptMode === "custom" || input.promptMode !== "guided" && custom ? "custom" : "guided",
   };
 }

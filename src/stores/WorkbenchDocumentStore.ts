@@ -4,6 +4,7 @@ import type {
   CodexWorkbenchLocalSettings,
   GhostNote,
   PackSession,
+  PackCard,
   ViewMode,
   WorkbenchCard,
 } from "../types.ts";
@@ -323,6 +324,22 @@ export class WorkbenchDocumentStore {
 
   incrementPity(): void {
     this.document.pityCounter += 1;
+    this.scheduleSave();
+  }
+
+  updatePackGuidance(packId: string, cardId: number, question: string, next: PackCard): void {
+    if (next.id !== cardId || next.main_question !== question) throw new Error("작성 도움은 질문을 바꿀 수 없습니다.");
+    const session = this.document.packHistory.find(pack => pack.packId === packId);
+    const index = session?.cards.findIndex(card => card.id === cardId && card.main_question === question) ?? -1;
+    if (session && index >= 0) session.cards[index] = structuredClone(next);
+    let updated = false;
+    for (const kept of this.document.cards) {
+      if (kept.sourcePackId === packId && kept.packCard?.id === cardId && kept.text === question) {
+        kept.packCard = structuredClone(next);
+        updated = true;
+      }
+    }
+    if (updated) this.emit("cards-changed");
     this.scheduleSave();
   }
 

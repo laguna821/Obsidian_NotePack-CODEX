@@ -1,5 +1,5 @@
 import { Notice } from "obsidian";
-import { DOMAINS } from "../ai/pack-preferences";
+import { CardGuidance } from "./CardGuidance";
 // ── PackCardElement: Individual Pack Card in Modal ────────────────────────
 
 import type { PackCard } from "../types";
@@ -10,18 +10,21 @@ export class PackCardElement {
   el: HTMLElement;
   private card: PackCard;
   get cardId(): number { return this.card.id; }
-  private isExpanded = false;
+  private guidance: CardGuidance | null = null;
   private onKeep: (cardId: number) => void;
   private onDiscard: (cardId: number) => void;
+  private onGuidance?: (signal: AbortSignal) => Promise<PackCard>;
 
   constructor(
     card: PackCard,
     onKeep: (cardId: number) => void,
     onDiscard: (cardId: number) => void,
+    onGuidance?: (signal: AbortSignal) => Promise<PackCard>,
   ) {
     this.card = card;
     this.onKeep = onKeep;
     this.onDiscard = onDiscard;
+    this.onGuidance = onGuidance;
     this.el = createDiv();
     this.render();
   }
@@ -55,72 +58,7 @@ export class PackCardElement {
       });
     }
 
-    // ── Expand/Collapse Toggle ──────────────────────────────────
-
-    const toggleBtn = this.el.createEl("button", {
-      cls: "np-pack-card-toggle",
-      text: this.isExpanded ? "▲ 접기" : "▼ 작성 도움 · 선택",
-      attr: { "aria-expanded": "false" },
-    });
-
-    const detailsEl = this.el.createDiv({
-      cls: `np-pack-card-details ${this.isExpanded ? "np-pack-card-details--open" : ""}`,
-    });
-
-    toggleBtn.addEventListener("click", () => {
-      this.isExpanded = !this.isExpanded;
-      detailsEl.classList.toggle("np-pack-card-details--open", this.isExpanded);
-      toggleBtn.setAttribute("aria-expanded", String(this.isExpanded));
-      toggleBtn.textContent = this.isExpanded ? "▲ 접기" : "▼ 작성 도움 · 선택";
-    });
-
-    // ── Detail Content ──────────────────────────────────────────
-
-    detailsEl.createEl("h4", { cls: "np-pack-card-name", text: card.card_name });
-    if (card.hook) detailsEl.createEl("p", { text: card.hook });
-    if (card.generationSettings) detailsEl.createEl("p", { text: "생성 설정: " + DOMAINS[card.generationSettings.domain] + " · 난도 " + card.generationSettings.difficulty });
-
-    // Bridge steps
-    if (card.bridge_steps.length > 0) {
-      detailsEl.createDiv({ cls: "np-pack-card-section-title", text: "📍 브릿지 스텝" });
-      const ol = detailsEl.createEl("ol", { cls: "np-pack-card-steps" });
-      card.bridge_steps.forEach((step) => {
-        ol.createEl("li", { text: step });
-      });
-    }
-
-    // Write now
-    if (card.write_now.length > 0) {
-      detailsEl.createDiv({ cls: "np-pack-card-section-title", text: "✏️ 바로 쓰기" });
-      const ul = detailsEl.createEl("ul", { cls: "np-pack-card-list" });
-      card.write_now.forEach((item) => {
-        ul.createEl("li", { text: item });
-      });
-    }
-
-    // Followups
-    if (card.followups.length > 0) {
-      detailsEl.createDiv({ cls: "np-pack-card-section-title", text: "🔗 확장 질문" });
-      const ul = detailsEl.createEl("ul", { cls: "np-pack-card-list" });
-      card.followups.forEach((item) => {
-        ul.createEl("li", { text: item });
-      });
-    }
-
-    // Failure signal
-    if (card.failure_signal) {
-      detailsEl.createDiv({ cls: "np-pack-card-section-title", text: "⚠️ 실패 신호" });
-      detailsEl.createEl("p", { cls: "np-pack-card-failure", text: card.failure_signal });
-    }
-
-    // Suggested links
-    if (card.suggested_links.length > 0) {
-      detailsEl.createDiv({ cls: "np-pack-card-section-title", text: "📎 추천 링크" });
-      const ul = detailsEl.createEl("ul", { cls: "np-pack-card-list" });
-      card.suggested_links.forEach((link) => {
-        ul.createEl("li", { text: link });
-      });
-    }
+    this.guidance = new CardGuidance(this.el.createDiv(), card, this.onGuidance);
 
     // ── Action Buttons ──────────────────────────────────────────
 
@@ -163,6 +101,7 @@ export class PackCardElement {
   }
 
   destroy(): void {
+    this.guidance?.destroy();
     this.el.remove();
   }
 }

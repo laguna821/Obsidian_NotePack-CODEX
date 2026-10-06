@@ -18,6 +18,9 @@ export function renderPackPreferences(el: HTMLElement, initial: PackPreferences,
       .addDropdown(d => d.addOptions({ auto: "자동", common: "기본", rare: "희귀", epic: "영웅", legendary: "전설" }).setValue(p.rarity).onChange(v => update({ rarity: v as PackPreferences["rarity"] })));
     new Setting(el).setName("난도").setDesc("문장을 어렵게 쓰는 정도가 아니라, 답을 생각하는 깊이입니다.")
       .addDropdown(d => d.addOptions({ "1": "1 · 쉬움", "2": "2 · 가볍게", "3": "3 · 보통", "4": "4 · 깊게", "5": "5 · 어려움" }).setValue(String(p.difficulty)).setDisabled(p.promptMode === "custom").onChange(v => update({ difficulty: Number(v) })));
+    new Setting(el).setName("질문 먼저 받기 · 실험")
+      .setDesc("켜면 다섯 질문을 먼저 받고, 작성 도움은 원하는 카드에서 별도로 만듭니다. 끄면 처음부터 함께 생성합니다.")
+      .addToggle(toggle => toggle.setValue(p.questionFirst).onChange(questionFirst => update({ questionFirst })));
     const details = el.createEl("details");
     details.createEl("summary", { text: "사고 성향 조절" });
     details.createEl("p", { text: "더 탐색하고 싶은 방향을 높여주세요. 각 카드가 반드시 수행해야 할 단계나 능력 점수는 아닙니다." });

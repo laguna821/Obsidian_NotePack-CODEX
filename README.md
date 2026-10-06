@@ -1,4 +1,4 @@
-# NotePack CODEX v4.2.0
+# NotePack CODEX v4.2.1
 
 <img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
 
@@ -8,7 +8,7 @@
 
 네 모델의 기본·전설 조건을 각각 한 번씩 비교했을 때 다섯 질문의 완료 시간은 기존 대비 약 57–86% 줄었습니다. 실제 속도와 질문 품질은 모델·입력에 따라 달라집니다. 도움은 카드마다 추가 요청 1회이므로, 다섯 장 모두 도움을 만들면 총 요청과 대기가 늘 수 있습니다.
 
-[4.2.0 변경 내역](RELEASE_NOTES_4.2.0.md) · [비교 조건과 실제 질문 전체](docs/QUESTION_FIRST_4_2_PREVIEW.md)
+[4.2.1 변경 내역](RELEASE_NOTES_4.2.1.md) · [비교 조건과 실제 질문 전체](docs/QUESTION_FIRST_4_2_PREVIEW.md)
 
 ## 4.1.0에서 이어지는 설정과 편의
 

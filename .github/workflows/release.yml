@@ -44,7 +44,7 @@ jobs:
         run: npm run check:secrets
 
       - name: Compare with the committed main.js
-        run: git diff --quiet -- main.js || echo "::warning::The committed main.js differs from this build. The release uses this build."
+        run: git diff --exit-code -- main.js
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v1

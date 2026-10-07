@@ -239,6 +239,20 @@ interface TranslationSet {
   settingsRuntimeCustomPath: string;
   settingsRuntimeCustomPathDesc: string;
   settingsRuntimeExperimental: string;
+  settingsRuntimeSharedLogin: string;
+  settingsRuntimeSetup: string;
+  settingsRuntimeInstallSteps: string;
+  settingsRuntimeCopyInstall: string;
+  settingsRuntimeCopied: string;
+  settingsRuntimeCopyFailed: string;
+  settingsRuntimeOpenTerminal: string;
+  settingsRuntimeOpenTerminalFailed: string;
+  settingsRuntimeOfficialGuide: string;
+  settingsRuntimeClaudeLoginSteps: string;
+  settingsRuntimeGeminiLoginSteps: string;
+  settingsRuntimeTestResponse: string;
+  settingsRuntimeTestResponseDesc: string;
+  settingsRuntimeResponseVerified: string;
   settingsClaudeOrgBlocked: string;
   settingsClaudeOrgAllow: string;
   settingsClaudeOrgAllowed: string;
@@ -395,7 +409,7 @@ const ko: TranslationSet = {
   settingsStatusReady: "실행 준비됨",
   settingsStatusNotConfigured: "AI가 설정되지 않음",
   settingsStatusPrefix: "상태",
-  settingsPlanConnections: "플랜 연결",
+  settingsPlanConnections: "로그인 및 플랜 연결",
   settingsPlanConnectionsDesktopDesc: "OpenAI 플랜은 브라우저 로그인(OAuth)으로, Claude·Gemini 플랜은 이 컴퓨터에 설치한 공식 CLI로 연결합니다. API 키가 필요하지 않습니다.",
   settingsPlanConnectionsMobileDesc: "플랜 연결은 데스크톱에서만 사용할 수 있습니다. 모바일에서는 API 키 프로바이더를 사용하세요.",
   settingsOpenAIPlanDesc: "ChatGPT / Codex 플랜 사용량을 활용합니다.",
@@ -514,8 +528,8 @@ const ko: TranslationSet = {
   settingsRuntimeStatusNotInstalled: "설치되지 않음",
   settingsRuntimeStatusLoginRequired: "로그인 필요",
   settingsRuntimeStatusBlocked: "요청 차단",
-  settingsRuntimeStatusReady: "사용 가능",
-  settingsRuntimeStatusError: "확인 실패",
+  settingsRuntimeStatusReady: "로그인 정보 확인됨 · 응답 확인 전",
+  settingsRuntimeStatusError: "요청 또는 연결 확인 실패",
   settingsRuntimeCheck: "연결 확인",
   settingsRuntimeOpenLogin: "로그인 터미널 열기",
   settingsRuntimeTerminalFailed: "터미널을 열지 못했습니다. 터미널을 직접 열고 다음 명령을 실행하세요: {command}",
@@ -526,6 +540,20 @@ const ko: TranslationSet = {
   settingsRuntimeCustomPath: "실행 파일 경로 (이 컴퓨터)",
   settingsRuntimeCustomPathDesc: "자동으로 찾지 못할 때만 입력하세요. 동기화되지 않고 이 컴퓨터에만 저장됩니다.",
   settingsRuntimeExperimental: "개인 사용 호환 경로이며 Anthropic 공식 연동이 아닙니다.",
+  settingsRuntimeSharedLogin: "카드 생성과 페르소나 주석은 같은 서비스의 로그인을 함께 사용합니다. 모델은 각각 선택할 수 있습니다. Claude·Gemini는 이 컴퓨터의 CMDS Achmage와 같은 공식 로그인 도구를 사용하므로 이미 로그인했다면 연결부터 확인하세요.",
+  settingsRuntimeSetup: "설치·로그인",
+  settingsRuntimeInstallSteps: "설치되지 않은 경우에만 명령을 복사하고 {shell} 창을 열어 붙여넣은 뒤 Enter를 누르세요. 설치가 끝나면 아래 연결 확인을 누르세요.",
+  settingsRuntimeCopyInstall: "설치 명령 복사",
+  settingsRuntimeCopied: "명령을 복사했습니다.",
+  settingsRuntimeCopyFailed: "복사하지 못했습니다. 표시된 명령을 직접 복사하세요.",
+  settingsRuntimeOpenTerminal: "터미널 열기",
+  settingsRuntimeOpenTerminalFailed: "터미널을 열지 못했습니다. 운영체제의 터미널을 직접 열어주세요.",
+  settingsRuntimeOfficialGuide: "공식 설치 안내",
+  settingsRuntimeClaudeLoginSteps: "로그인 창을 열고 브라우저 안내가 나타나면 Enter를 누르세요. Claude 구독 계정으로 로그인해 연결을 허용하세요. 주소나 일회용 코드 입력을 요청하면 공식 로그인 창에서만 진행하고, 완료 후 이 화면으로 돌아오세요.",
+  settingsRuntimeGeminiLoginSteps: "로그인 창을 열어 브라우저에서 Google 계정으로 로그인하세요. 일회용 코드는 공식 도구가 직접 요구할 때만 터미널에 붙여넣으세요. 로그인 완료 후 이 화면으로 돌아오세요.",
+  settingsRuntimeTestResponse: "실제 응답 확인",
+  settingsRuntimeTestResponseDesc: "선택한 Claude 모델로 짧은 확인 요청을 보냅니다. Claude가 선택되지 않았다면 Sonnet을 사용합니다. 구독 사용량이 소량 사용됩니다.",
+  settingsRuntimeResponseVerified: "실제 응답 확인됨",
   settingsClaudeOrgBlocked: "Claude Team/Enterprise 계정입니다. 조직 관리자가 적용한 Claude Code 설정이 NotePack 요청에도 적용될 수 있어, 이 컴퓨터에서 허용하기 전에는 요청을 보내지 않습니다.",
   settingsClaudeOrgAllow: "Team/Enterprise 계정 허용…",
   settingsClaudeOrgAllowed: "이 컴퓨터에서 Team/Enterprise 계정 사용을 허용했습니다. 조직이 관리하는 Claude Code 설정이 요청에 적용될 수 있습니다.",
@@ -682,7 +710,7 @@ const en: TranslationSet = {
   settingsStatusReady: "ready to run",
   settingsStatusNotConfigured: "AI not configured",
   settingsStatusPrefix: "Status",
-  settingsPlanConnections: "Plan Connections",
+  settingsPlanConnections: "Login and connections",
   settingsPlanConnectionsDesktopDesc: "OpenAI Plan connects with a browser login (OAuth); Claude and Gemini Plan run the official CLIs installed on this computer. No API keys are required.",
   settingsPlanConnectionsMobileDesc: "Plan connections are only available on desktop. On mobile, use API key providers instead.",
   settingsOpenAIPlanDesc: "Uses your ChatGPT / Codex plan usage.",
@@ -801,8 +829,8 @@ const en: TranslationSet = {
   settingsRuntimeStatusNotInstalled: "Not installed",
   settingsRuntimeStatusLoginRequired: "Sign-in required",
   settingsRuntimeStatusBlocked: "Requests blocked",
-  settingsRuntimeStatusReady: "Ready",
-  settingsRuntimeStatusError: "Check failed",
+  settingsRuntimeStatusReady: "Login metadata checked · response not verified",
+  settingsRuntimeStatusError: "Request or connection check failed",
   settingsRuntimeCheck: "Check connection",
   settingsRuntimeOpenLogin: "Open sign-in terminal",
   settingsRuntimeTerminalFailed: "Could not open a terminal. Open one yourself and run: {command}",
@@ -813,6 +841,20 @@ const en: TranslationSet = {
   settingsRuntimeCustomPath: "Executable path (this computer)",
   settingsRuntimeCustomPathDesc: "Only if it is not found automatically. Saved on this computer only, never synced.",
   settingsRuntimeExperimental: "Personal-use compatibility path, not an official Anthropic integration.",
+  settingsRuntimeSharedLogin: "Cards and persona annotations share the login for each service; their models can be selected separately. Claude and Gemini use the same official login tools as CMDS Achmage on this computer. If already signed in, check the connection first.",
+  settingsRuntimeSetup: "Install / sign in",
+  settingsRuntimeInstallSteps: "Only if not installed: copy the command, open {shell}, paste it and press Enter. After installation, check the connection below.",
+  settingsRuntimeCopyInstall: "Copy install command",
+  settingsRuntimeCopied: "Command copied.",
+  settingsRuntimeCopyFailed: "Copy failed. Select and copy the displayed command.",
+  settingsRuntimeOpenTerminal: "Open terminal",
+  settingsRuntimeOpenTerminalFailed: "Could not open a terminal. Open your system terminal manually.",
+  settingsRuntimeOfficialGuide: "Official installation guide",
+  settingsRuntimeClaudeLoginSteps: "Open the sign-in window and press Enter when prompted to open the browser. Sign in with your Claude subscription and allow the connection. If a URL or one-time code is requested, complete it only in the official sign-in window, then return here.",
+  settingsRuntimeGeminiLoginSteps: "Open the sign-in window and sign in with Google in the browser. Paste a one-time code into the terminal only if the official tool requests it. Return here after sign-in completes.",
+  settingsRuntimeTestResponse: "Test actual response",
+  settingsRuntimeTestResponseDesc: "Sends a short request to the selected Claude model, or Sonnet if another provider is selected. Uses a small amount of subscription quota.",
+  settingsRuntimeResponseVerified: "Actual response verified",
   settingsClaudeOrgBlocked: "This is a Claude Team/Enterprise account. Claude Code settings applied by your organization can also apply to NotePack's requests, so NotePack waits until you allow organization accounts on this computer.",
   settingsClaudeOrgAllow: "Allow Team/Enterprise account…",
   settingsClaudeOrgAllowed: "Team/Enterprise accounts are allowed on this computer. Organization-managed Claude Code settings may apply to requests.",

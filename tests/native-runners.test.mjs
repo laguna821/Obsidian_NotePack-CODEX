@@ -64,6 +64,15 @@ function claudeRequest(runner, overrides = {}) {
 
 // ── Claude Code ───────────────────────────────────────────────────────────
 
+test('Claude preserves authentication errors from result.errors and assistant error codes', async () => {
+  const failed = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['OAuth token has expired'] };
+  assert.match(parseClaudeStreamEvent(failed).error, /OAuth token has expired/);
+  const { runner } = streamingRunner([INIT, failed]);
+  await assert.rejects(claudeRequest(runner), /sign in.*computer/i);
+  const coded = streamingRunner([INIT, { type: 'assistant', error: 'authentication_failed', message: { content: [{ type: 'text', text: 'Invalid credentials' }] } }]);
+  await assert.rejects(claudeRequest(coded.runner), /sign in.*computer/i);
+});
+
 test('Claude Code runs headless with no tools, MCP servers, or user settings', () => {
   const args = buildClaudeArgs({ model: 'opus', effort: 'high', systemPrompt: 'S' });
 

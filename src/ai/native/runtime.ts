@@ -9,7 +9,7 @@ import {
   verifyClaudePlanAuth,
 } from "./auth.ts";
 import { runAgyOnce } from "./antigravity.ts";
-import { runClaudeOnce, type ClaudeEffort } from "./claude.ts";
+import { ClaudePlanLoginRequiredError, ClaudePlanRequestBlockedError, runClaudeOnce, type ClaudeEffort } from "./claude.ts";
 import { launchVisibleTerminal, quoteForTerminal, requireNode, runNativeProcess } from "./process.ts";
 import { resolveExecutable } from "./resolver.ts";
 import type {
@@ -59,6 +59,7 @@ export interface NativeRuntimeDeps {
   store: DeviceStore;
   now: () => number;
   openTerminal: (command: string, onError: (error: Error) => void) => void;
+  companionPath?: (provider: NativeRuntimeProvider) => string | undefined;
 }
 
 interface VerifiedRuntime {
@@ -114,7 +115,10 @@ export class NativeRuntimeService {
   }
 
   resolveExecutable(provider: NativeRuntimeProvider): string | undefined {
-    const customPath = this.getCustomPath(provider);
+    // Reuse CMDS Achmage's device-local selection when NotePack has no override.
+    // No account or credential is copied between plugins.
+    const customPath = [this.getCustomPath(provider), this.deps.companionPath?.(provider)]
+      .find((candidate): candidate is string => Boolean(candidate && this.deps.isFile(candidate)));
     return resolveExecutable(provider, {
       platform: this.deps.platform,
       home: this.deps.homedir(),
@@ -122,7 +126,7 @@ export class NativeRuntimeService {
       pathDelimiter: this.deps.pathDelimiter,
       joinPath: this.deps.joinPath,
       isFile: this.deps.isFile,
-      customPath: customPath && this.deps.isFile(customPath) ? customPath : undefined,
+      customPath,
     });
   }
 
@@ -158,6 +162,7 @@ export class NativeRuntimeService {
     jsonSchema?: Record<string, unknown>;
   }): Promise<string> {
     const runtime = await this.ensureAllowed("claude", request.signal);
+    const generation = this.generations.claude;
     assertClaudeVersionSupportsModel(request.model, runtime.version);
     const cwd = this.deps.makeTempDir();
     try {
@@ -181,7 +186,23 @@ export class NativeRuntimeService {
         signal: request.signal,
         timeoutMs: request.effort === "max" ? MAX_EFFORT_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
       });
+      if (generation === this.generations.claude) {
+        this.publish({ ...this.snapshots.claude, status: "ready", error: undefined,
+          requestVerifiedAt: this.deps.now(), requestModel: request.model });
+      }
       return result.content;
+    } catch (error) {
+      if (generation === this.generations.claude && !(error instanceof Error && error.name === "AbortError")) {
+        this.invalidate("claude");
+        const loginRequired = error instanceof ClaudePlanLoginRequiredError;
+        const blocked = error instanceof ClaudePlanRequestBlockedError;
+        const reason = error instanceof Error ? error.message : String(error);
+        this.publish({ ...this.snapshots.claude, status: loginRequired ? "login-required" : blocked ? "blocked" : "error",
+          error: reason, checkedAt: this.deps.now(),
+          decision: loginRequired ? { allowed: false, status: "login-required", code: "login-required", reason,
+            evidence: ["model request rejected subscription authentication"] } : undefined });
+      }
+      throw error;
     } finally {
       this.deps.removeDir(cwd);
     }
@@ -226,13 +247,29 @@ export class NativeRuntimeService {
     this.deps.openTerminal(command, () => onError(command));
   }
 
+  openSetupTerminal(onError: () => void): void {
+    this.deps.openTerminal(this.deps.platform === "win32" ? "$null" : ":", onError);
+  }
+
   private async ensureAllowed(provider: NativeRuntimeProvider, signal?: AbortSignal): Promise<VerifiedRuntime> {
     const label = provider === "claude" ? "Claude" : "Gemini";
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const cached = this.verified.get(provider);
-      if (cached && cached.key === this.cacheKey(provider) && cached.until > this.deps.now()) return cached;
+      // Match CMDS: Claude authentication is checked before every request.
+      if (provider !== "claude" && cached && cached.key === this.cacheKey(provider) && cached.until > this.deps.now()) return cached;
       const generation = this.generations[provider];
-      const { snapshot, runtime } = await this.check(provider, signal);
+      let checked: Awaited<ReturnType<NativeRuntimeService["check"]>>;
+      try {
+        checked = await this.check(provider, signal);
+      } catch (error) {
+        if (generation === this.generations[provider] && !(error instanceof Error && error.name === "AbortError")) {
+          this.invalidate(provider);
+          this.publish({ ...this.snapshots[provider], status: "error", checkedAt: this.deps.now(),
+            error: error instanceof Error ? error.message : String(error) });
+        }
+        throw error;
+      }
+      const { snapshot, runtime } = checked;
       // Consent, the executable, or the login changed during the check.
       if (generation !== this.generations[provider]) continue;
       this.publish(snapshot);
@@ -248,6 +285,8 @@ export class NativeRuntimeService {
   private invalidate(provider: NativeRuntimeProvider): void {
     this.generations[provider] += 1;
     this.verified.delete(provider);
+    this.publish({ ...this.snapshots[provider], status: "unknown", decision: undefined, error: undefined,
+      requestVerifiedAt: undefined, requestModel: undefined, checkedAt: undefined });
   }
 
   private cacheKey(provider: NativeRuntimeProvider): string {
@@ -437,6 +476,14 @@ export function createDesktopNativeRuntimeDeps(): NativeRuntimeDeps {
     store: configuredDeviceStore,
     now: () => Date.now(),
     openTerminal: launchVisibleTerminal,
+    companionPath: (provider) => {
+      try {
+        // CMDS NativeRuntimePathStore uses this exact legacy key. Read only;
+        // NotePack's own path continues to use Obsidian's device-local store.
+        return typeof window !== "undefined" && "document" in window
+          ? window.localStorage.getItem(`smart-composer:native-runtime-path:${provider}`) ?? undefined : undefined;
+      } catch { return undefined; }
+    },
   };
 }
 

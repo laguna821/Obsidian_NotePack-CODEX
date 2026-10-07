@@ -77,4 +77,7 @@ export interface NativeRuntimeSnapshot {
   decision?: RuntimeAuthDecision;
   error?: string;
   checkedAt?: number;
+  /** Only set after an actual model response, never by auth status alone. */
+  requestVerifiedAt?: number;
+  requestModel?: string;
 }

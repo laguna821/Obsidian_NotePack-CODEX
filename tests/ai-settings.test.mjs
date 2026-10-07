@@ -385,7 +385,7 @@ test('Claude and Gemini Plan run through the desktop CLIs without stored tokens'
   const settings = baseSettings({ activeChatModelId: 'anthropic-plan/claude-sonnet-latest-plan' });
   const state = getActiveModelExecutionState(settings);
   assert.equal(state.canExecute, true);
-  assert.equal(state.code, 'ready');
+  assert.equal(state.code, 'native_check_required');
 
   const config = buildAIConfig(settings);
   assert.ok(config);

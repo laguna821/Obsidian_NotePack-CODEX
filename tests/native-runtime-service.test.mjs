@@ -49,6 +49,7 @@ function fakeDesktop(state = {}) {
     calls.push(options);
     const args = options.args;
     if (args[0] === '--version') {
+      if (config.versionError) throw new Error(config.versionError);
       return { stdout: options.executable === CLAUDE ? `${config.claudeVersion}\n` : '1.2.14\n', stderr: '', exitCode: 0 };
     }
     if (args[0] === 'auth' && args[1] === 'status') {
@@ -91,6 +92,7 @@ function fakeDesktop(state = {}) {
       written.set('terminal', command);
       if (config.terminalFails) onError(new Error('spawn x-terminal-emulator ENOENT'));
     },
+    companionPath: provider => config.companionPaths?.[provider],
   });
 
   const authCalls = () => calls.filter((call) => call.args[0] === 'auth').length;
@@ -108,6 +110,67 @@ function fakeDesktop(state = {}) {
 }
 
 const claudeRequest = { model: 'sonnet', effort: 'medium', systemPrompt: 'S', prompt: 'P' };
+
+test('CMDS custom executable is reused without copying credentials and NotePack override wins', async () => {
+  const desktop = fakeDesktop({ files: [CLAUDE, '/cmds/claude', '/np/claude'], companionPaths: { claude: '/cmds/claude' } });
+  assert.equal(desktop.service.resolveExecutable('claude'), '/cmds/claude');
+  desktop.service.setCustomPath('claude', '/np/claude');
+  assert.equal(desktop.service.resolveExecutable('claude'), '/np/claude');
+  desktop.service.setCustomPath('claude', '/old-computer/claude');
+  assert.equal(desktop.service.resolveExecutable('claude'), '/cmds/claude');
+  desktop.service.setCustomPath('claude', '');
+  assert.equal(desktop.service.resolveExecutable('claude'), '/cmds/claude');
+  desktop.config.companionPaths.claude = '/missing/claude';
+  assert.equal(desktop.service.resolveExecutable('claude'), CLAUDE);
+  assert.equal(desktop.store.size, 0);
+});
+
+test('a sign-out between requests is checked immediately, even before the old cache expiry', async () => {
+  const desktop = fakeDesktop();
+  await desktop.service.completeWithClaude(claudeRequest);
+  desktop.config.auth = JSON.stringify({ loggedIn: false }); desktop.config.authExit = 1;
+  await assert.rejects(desktop.service.completeWithClaude({ ...claudeRequest, model: 'opus' }), /Sign in/);
+  assert.equal(desktop.calls.filter(c => c.args[0] === '-p').length, 1);
+  assert.equal(desktop.service.getSnapshot('claude').status, 'login-required');
+});
+
+test('a failing runtime check clears a previous successful response status', async () => {
+  const desktop = fakeDesktop();
+  await desktop.service.completeWithClaude(claudeRequest);
+  desktop.config.versionError = 'Executable unavailable';
+  await assert.rejects(desktop.service.completeWithClaude(claudeRequest), /Executable unavailable/);
+  assert.equal(desktop.service.getSnapshot('claude').status, 'error');
+  assert.equal(desktop.service.getSnapshot('claude').requestVerifiedAt, undefined);
+});
+
+test('OAuth rejection clears cached readiness and is shared by the next model request', async () => {
+  const desktop = fakeDesktop({ claudeEvents: [INIT, { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['OAuth token has expired. Please obtain a new token or refresh your existing token.'] }] });
+  await desktop.service.diagnose('claude');
+  await assert.rejects(desktop.service.completeWithClaude(claudeRequest), /sign in.*computer/i);
+  assert.equal(desktop.service.getSnapshot('claude').status, 'login-required');
+  assert.equal(desktop.service.getSnapshot('claude').decision.allowed, false);
+  desktop.config.auth = JSON.stringify({ loggedIn: false });
+  desktop.config.authExit = 1;
+  await assert.rejects(desktop.service.completeWithClaude({ ...claudeRequest, model: 'opus' }), /Sign in/);
+  assert.equal(desktop.authCalls(), 3);
+  assert.equal(desktop.calls.filter(c => c.args[0] === '-p').length, 1);
+});
+
+test('metadata check is distinct from a successful response and login resets both', async () => {
+  const desktop = fakeDesktop();
+  assert.equal((await desktop.service.diagnose('claude')).requestVerifiedAt, undefined);
+  await desktop.service.completeWithClaude(claudeRequest);
+  assert.equal(desktop.service.getSnapshot('claude').requestVerifiedAt, 1_000_000);
+  desktop.service.openLoginTerminal('claude', () => {});
+  assert.equal(desktop.service.getSnapshot('claude').status, 'unknown');
+  assert.equal(desktop.service.getSnapshot('claude').requestVerifiedAt, undefined);
+});
+
+test('quota failure does not falsely ask for OAuth login', async () => {
+  const desktop = fakeDesktop({ claudeEvents: [INIT, { ...RESULT, subtype: 'error_during_execution', is_error: true, result: 'Rate limit exceeded (429)' }] });
+  await assert.rejects(desktop.service.completeWithClaude(claudeRequest), /Rate limit/);
+  assert.equal(desktop.service.getSnapshot('claude').status, 'error');
+});
 
 test('explicit schema passes through native runtime with long prompt file and cleanup', async () => {
   const schema = { type:'object', properties:{answer:{type:'integer'}}, required:['answer'], additionalProperties:false };
@@ -140,7 +203,7 @@ test('a missing CLI is reported as not installed', async () => {
   assert.equal(desktop.calls.length, 0);
 });
 
-test('a Max login is ready and the check is reused for a minute', async () => {
+test('a Max login is checked before every Claude request, matching CMDS', async () => {
   const desktop = fakeDesktop();
   const snapshot = await desktop.service.diagnose('claude');
 
@@ -149,7 +212,7 @@ test('a Max login is ready and the check is reused for a minute', async () => {
   assert.equal(snapshot.executablePath, CLAUDE);
   assert.equal(await desktop.service.completeWithClaude(claudeRequest), 'OK');
   assert.equal(await desktop.service.completeWithClaude(claudeRequest), 'OK');
-  assert.equal(desktop.authCalls(), 1);
+  assert.equal(desktop.authCalls(), 3);
 
   const request = desktop.calls.find((call) => call.args[0] === '-p');
   assert.equal(request.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');

@@ -19,6 +19,19 @@ export class ClaudePlanRequestBlockedError extends Error {
   }
 }
 
+export class ClaudePlanLoginRequiredError extends Error {
+  constructor() {
+    super("Claude Plan authentication expired or was rejected. Open NotePack settings > Login and connections > Claude and sign in on this computer, then check the connection. Cards and persona annotations share this login.");
+    this.name = "ClaudePlanLoginRequiredError";
+  }
+}
+
+function requestFailure(detail: string): Error {
+  return /authentication[_ ](?:failed|required)|unauthenticated|unauthorized|invalid[_ ](?:grant|token)|(?:oauth|access|refresh)\s+token[^\n]*(?:expired|revoked|invalid)|(?:expired|revoked|invalid)[^\n]*\btoken\b|not\s+(?:logged|signed)\s*in|\b401\b/i.test(detail)
+    ? new ClaudePlanLoginRequiredError()
+    : new Error(detail);
+}
+
 export function buildClaudeArgs(params: {
   model: string;
   effort?: ClaudeEffort;
@@ -108,9 +121,12 @@ export function parseClaudeStreamEvent(event: Record<string, unknown>): ClaudeSt
   if (event.type === "result") {
     const failed = event.is_error === true || (typeof event.subtype === "string" && event.subtype !== "success");
     const result = typeof event.result === "string" ? event.result : undefined;
+    const errors = Array.isArray(event.errors)
+      ? event.errors.filter((item): item is string => typeof item === "string").join("\n")
+      : undefined;
     return {
       finalText: failed ? undefined : result,
-      error: failed ? result || (typeof event.error === "string" ? event.error : "Claude Code request failed.") : undefined,
+      error: failed ? errors || result || (typeof event.error === "string" ? event.error : "Claude Code request failed.") : undefined,
     };
   }
   return {};
@@ -190,7 +206,7 @@ export async function runClaudeOnce(
           if (parsed.delta && !request.jsonSchema) { streamedText += parsed.delta; request.onTextDelta?.(parsed.delta); }
           if (parsed.text) assistantText += parsed.text;
           if (parsed.finalText !== undefined) finalText = parsed.finalText;
-          if (parsed.error) requestError = parsed.error;
+          if (parsed.error) requestError ??= parsed.error;
           if (request.jsonSchema && event.type === "result" && !parsed.error) {
             const structured = asRecord(event.structured_output);
             if (event.subtype !== "success" || !structured) requestError = "Claude completed without a structured object result.";
@@ -200,7 +216,7 @@ export async function runClaudeOnce(
       });
     } catch (error) {
       if (violation) throw new ClaudePlanRequestBlockedError(violation);
-      if (requestError) throw new Error(requestError);
+      if (requestError) throw requestFailure(requestError);
       throw error;
     }
 
@@ -212,10 +228,10 @@ export async function runClaudeOnce(
         "Claude Code did not report its session settings, so the organization request was discarded.",
       );
     }
-    if (requestError) throw new Error(requestError);
+    if (requestError) throw requestFailure(requestError);
     if (result.exitCode !== 0) {
       const detail = (result.stderr.trim() || result.stdout.trim()).split(/\r?\n/).slice(-3).join(" ").slice(0, 400);
-      throw new Error(detail || "Claude Code failed. Open NotePack settings and check the Claude Plan connection.");
+      throw requestFailure(detail || "Claude Code failed. Open NotePack settings and check the Claude Plan connection.");
     }
     if (request.jsonSchema && structuredText === undefined) throw new Error("Claude completed without a structured object result.");
     const content = (request.jsonSchema ? structuredText! : (finalText ?? (assistantText || streamedText))).trim();

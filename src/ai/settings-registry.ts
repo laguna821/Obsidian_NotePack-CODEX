@@ -431,6 +431,7 @@ export interface ResolvedAISelection {
 
 export type AIExecutionStateCode =
   | "ready"
+  | "native_check_required"
   | "unsupported_platform"
   | "missing_model"
   | "missing_base_url"
@@ -769,7 +770,7 @@ export function getResolvedModelExecutionState(resolved: ResolvedAISelection | n
       // Installation and login are checked by the runtime right before each
       // request (and on demand in settings); nothing is stored in the vault.
       return nativeRuntimeAvailable
-        ? { canExecute: true, code: "ready", message: "Ready to run." }
+        ? { canExecute: true, code: "native_check_required", message: "The login on this computer is checked when a request starts." }
         : {
             canExecute: false,
             code: "unsupported_platform",

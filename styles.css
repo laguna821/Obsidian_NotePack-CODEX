@@ -3351,3 +3351,8 @@ body.np-is-resizing-horizontal {
 .np-pack-presets { display: flex; flex-wrap: wrap; gap: 8px; }
 .np-pack-preferences select { max-width: 100%; }
 @media (max-width: 600px) { .np-pack-preferences .setting-item { flex-wrap: wrap; gap: 8px; } .np-pack-preferences .setting-item-control { flex: 1 1 100%; justify-content: flex-start; } .np-pack-preferences select { width: 100%; } }
+.notepack-hidden { display: none; }
+.notepack-settings-runtime-path { overflow-wrap: anywhere; font-size: var(--font-smallest); color: var(--text-muted); }
+.notepack-settings .notepack-plan-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.notepack-runtime-advanced { margin-top: 12px; }
+.notepack-runtime-advanced summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-small); }

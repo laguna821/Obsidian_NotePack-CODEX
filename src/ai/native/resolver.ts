@@ -29,6 +29,8 @@ export function executableCandidates(provider: NativeRuntimeProvider, context: R
         joinPath(programFiles, "WinGet", "Links", "claude.exe"),
         joinPath(home, ".claude", "local", "claude.exe"),
         joinPath(localAppData, "Claude", "claude.exe"),
+        joinPath(programFiles, "Claude", "claude.exe"),
+        joinPath(env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Claude", "claude.exe"),
       );
     } else {
       candidates.push(joinPath(home, ".local", "bin", "claude"));
@@ -47,6 +49,10 @@ export function executableCandidates(provider: NativeRuntimeProvider, context: R
       joinPath(localAppData, "agy", "bin", "agy.exe"),
       joinPath(home, ".local", "bin", "agy.exe"),
       joinPath(home, ".gemini", "antigravity-cli", "bin", "agy.exe"),
+      joinPath(localAppData, "Antigravity", "bin", "agy.exe"),
+      joinPath(localAppData, "Programs", "Antigravity", "agy.exe"),
+      joinPath(localAppData, "Google", "Antigravity", "agy.exe"),
+      joinPath(env.ProgramFiles ?? "C:\\Program Files", "Antigravity", "agy.exe"),
     );
   } else {
     candidates.push(

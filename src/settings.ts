@@ -56,6 +56,7 @@ import {
 } from "./ai/oauth";
 import { getNativeRuntime } from "./ai/native/runtime";
 import { confirmAction } from "./components/ConfirmModal";
+import { NativePlanConnectionModal, runtimeStatusLabel } from "./components/NativePlanConnectionModal";
 import type { NativeRuntimeProvider, NativeRuntimeSnapshot } from "./ai/native/types";
 import type {
   AIChatModel,
@@ -915,11 +916,6 @@ class ClaudeOrganizationConsentModal extends Modal {
   }
 }
 
-const RUNTIME_INSTALL_GUIDES: Record<NativeRuntimeProvider, string> = {
-  claude: "https://code.claude.com/docs/en/installation",
-  gemini: "https://antigravity.google/docs/cli/install",
-};
-
 type SettingsHeadingLevel = "section" | "card" | "sub";
 
 /**
@@ -932,25 +928,6 @@ function addSettingsHeading(containerEl: HTMLElement, text: string, level: Setti
     .setHeading()
     .setClass("np-settings-heading")
     .setClass(`np-settings-heading--${level}`);
-}
-
-function runtimeStatusLabel(snapshot: NativeRuntimeSnapshot): string {
-  switch (snapshot.status) {
-    case "checking":
-      return t("settingsRuntimeStatusChecking");
-    case "not-installed":
-      return t("settingsRuntimeStatusNotInstalled");
-    case "login-required":
-      return t("settingsRuntimeStatusLoginRequired");
-    case "blocked":
-      return t("settingsRuntimeStatusBlocked");
-    case "ready":
-      return t("settingsRuntimeStatusReady");
-    case "error":
-      return t("settingsRuntimeStatusError");
-    default:
-      return t("settingsRuntimeStatusUnknown");
-  }
 }
 
 type SettingsTabId = "setup" | "persona" | "card-difficulty" | "general";
@@ -1012,6 +989,9 @@ export class NotePackSettingTab extends PluginSettingTab {
    */
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
+      this.sectionGroup(t("settingsPlanConnections"), SECTION_ALIASES.plan, (el, settings) =>
+        this.renderPlanSection(el, settings, false),
+      ),
       {
         type: "group",
         heading: t("settingsAiRuntime"),
@@ -1025,9 +1005,6 @@ export class NotePackSettingTab extends PluginSettingTab {
         type: "page",
         name: t("settingsTabSetup"),
         items: [
-          this.sectionGroup(t("settingsPlanConnections"), SECTION_ALIASES.plan, (el, settings) =>
-            this.renderPlanSection(el, settings, false),
-          ),
           this.sectionGroup(t("settingsApiKeyProviders"), SECTION_ALIASES.providers, (el, settings) =>
             this.renderProviderSection(el, settings, false),
           ),
@@ -1077,6 +1054,7 @@ export class NotePackSettingTab extends PluginSettingTab {
 
   /** Obsidian before 1.13 calls display() and gets the tabbed page. */
   display(): void {
+    this.activeTab = "setup";
     this.renderTabs();
   }
 
@@ -1107,8 +1085,8 @@ export class NotePackSettingTab extends PluginSettingTab {
       const panel = containerEl.createDiv({ cls: "notepack-settings-tabpanel" });
 
       if (this.activeTab === "setup") {
-        this.renderOverview(panel, settings);
         this.renderPlanSection(panel, settings);
+        this.renderOverview(panel, settings);
         this.renderProviderSection(panel, settings);
         this.renderWebGroundingSection(panel, settings);
       } else if (this.activeTab === "persona") {
@@ -1307,11 +1285,17 @@ export class NotePackSettingTab extends PluginSettingTab {
         ? `${t("settingsProviderSummary")}: ${getProviderDisplayName(resolved.provider)}`
         : `${t("settingsProviderSummary")}: ${t("settingsStatusNotConfigured")}`,
     });
-    summary.createEl("p", {
-      text: executionState.canExecute
-        ? `${t("settingsStatusPrefix")}: ${t("settingsStatusReady")}`
-        : `${t("settingsStatusPrefix")}: ${executionState.message}`,
-    });
+    const status = summary.createEl("p");
+    const nativeProvider = resolved?.provider.type === "anthropic-plan" ? "claude"
+      : resolved?.provider.type === "gemini-plan" ? "gemini" : undefined;
+    const paintStatus = () => {
+      const label = nativeProvider && Platform.isDesktop
+        ? runtimeStatusLabel(getNativeRuntime().getSnapshot(nativeProvider))
+        : executionState.canExecute ? t("settingsStatusReady") : executionState.message;
+      status.setText(`${t("settingsStatusPrefix")}: ${label}`);
+    };
+    paintStatus();
+    if (nativeProvider && Platform.isDesktop) this.subscriptionTarget.push(getNativeRuntime().onChange(paintStatus));
   }
 
   private renderPlanSection(containerEl: HTMLElement, settings: AISettings, withHeading = true): void {
@@ -1322,8 +1306,9 @@ export class NotePackSettingTab extends PluginSettingTab {
         ? t("settingsPlanConnectionsDesktopDesc")
         : t("settingsPlanConnectionsMobileDesc"),
     });
+    section.createEl("p", { text: t("settingsRuntimeSharedLogin") });
 
-    const grid = section.createDiv({ cls: "notepack-settings-grid" });
+    const grid = section.createDiv({ cls: "notepack-settings-grid notepack-plan-grid" });
     this.renderPlanCard(grid, settings, "openai-plan", "OpenAI", t("settingsOpenAIPlanDesc"));
     this.renderNativeRuntimeCard(grid, settings, "claude", "Claude", t("settingsAnthropicPlanDesc"));
     this.renderNativeRuntimeCard(grid, settings, "gemini", "Gemini", t("settingsGeminiPlanDesc"));
@@ -1421,6 +1406,7 @@ export class NotePackSettingTab extends PluginSettingTab {
     const runtime = getNativeRuntime();
     // Kept outside paint: status updates repaint the card while the user types.
     let customPath = runtime.getCustomPath(provider);
+    let testing = false;
     const paint = () => {
       const snapshot = runtime.getSnapshot(provider);
       card.empty();
@@ -1459,19 +1445,22 @@ export class NotePackSettingTab extends PluginSettingTab {
         void this.checkNativeRuntime(provider);
       });
 
-      if (snapshot.status === "not-installed") {
-        actions.createEl("button", { text: t("settingsRuntimeInstallGuide") }).addEventListener("click", () => {
-          window.open(RUNTIME_INSTALL_GUIDES[provider], "_blank");
-        });
-      } else if (snapshot.executablePath) {
-        actions.createEl("button", { text: t("settingsRuntimeOpenLogin") }).addEventListener("click", () => {
-          try {
-            runtime.openLoginTerminal(provider, (command) => {
-              new Notice(t("settingsRuntimeTerminalFailed").replace("{command}", command), 15000);
-            });
-          } catch (error) {
-            new Notice(error instanceof Error ? error.message : String(error));
-          }
+      actions.createEl("button", { text: t("settingsRuntimeSetup") }).addEventListener("click", () => {
+        new NativePlanConnectionModal(this.app, provider, () => this.checkNativeRuntime(provider, { silent: true })).open();
+      });
+      if (provider === "claude") {
+        const test = actions.createEl("button", { text: t("settingsRuntimeTestResponse") });
+        test.disabled = testing || snapshot.status === "checking" || !snapshot.executablePath;
+        test.title = t("settingsRuntimeTestResponseDesc");
+        test.addEventListener("click", () => {
+          testing = true;
+          test.disabled = true;
+          const active = resolveActiveChatModel(this.plugin.settingsStore.settings);
+          const model = active?.provider.type === "anthropic-plan" ? active.model.model : "sonnet";
+          void runtime.completeWithClaude({ model, effort: "low", systemPrompt: "Return only NP_OK.", prompt: "Return NP_OK." })
+            .then(() => new Notice(t("settingsRuntimeResponseVerified")))
+            .catch(error => new Notice(error instanceof Error ? error.message : String(error), 12000))
+            .finally(() => { testing = false; paint(); });
         });
       }
 
@@ -1491,7 +1480,10 @@ export class NotePackSettingTab extends PluginSettingTab {
         });
       }
 
-      new Setting(card)
+      const advanced = card.createEl("details", { cls: "notepack-runtime-advanced" });
+      advanced.createEl("summary", { text: t("settingsRuntimeCustomPath") });
+      if (snapshot.executablePath) advanced.createEl("p", { text: snapshot.executablePath, cls: "notepack-settings-runtime-path" });
+      new Setting(advanced)
         .setName(t("settingsRuntimeCustomPath"))
         .setDesc(t("settingsRuntimeCustomPathDesc"))
         .addText((text) => {
@@ -1512,7 +1504,8 @@ export class NotePackSettingTab extends PluginSettingTab {
 
     paint();
     this.subscriptionTarget.push(runtime.onChange(paint));
-    if (runtime.getSnapshot(provider).status === "unknown") {
+    const snapshot = runtime.getSnapshot(provider);
+    if (snapshot.status !== "checking" && (!snapshot.checkedAt || Date.now() - snapshot.checkedAt > 60_000)) {
       void this.checkNativeRuntime(provider, { silent: true });
     }
   }

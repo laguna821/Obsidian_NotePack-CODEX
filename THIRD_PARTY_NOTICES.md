@@ -12,6 +12,13 @@ Team/Enterprise opt-in, the Claude Code session guard, and the Antigravity
 headless protocol) is adapted from CMDS Achmage
 (https://github.com/CMDSPACE-DEV/CMDS-Achmage).
 
+The installation guide and `NativePlanConnectionModal` also adapt the
+install/detect/sign-in/check workflow from CMDS `NativeRuntimeService`,
+`NativeRuntimeInstallModal`, `NativeRuntimeLoginModal`, and
+`NativeRuntimeLoginSteps` at commit `df6c3b4` (1.2.0). Device-local executable
+overrides use CMDS's existing path as a read-only fallback; credentials remain
+owned by the official CLI.
+
 MIT License
 
 Copyright (c) 2024 Heesu Suh

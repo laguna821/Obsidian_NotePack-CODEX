@@ -2,6 +2,13 @@
 
 버전별 자세한 내용은 각 릴리즈 노트와 [GitHub Releases](https://github.com/laguna821/Obsidian_NotePack-CODEX/releases)에 있습니다.
 
+## 4.2.2 — 2026-10-07
+
+- 설정 첫 화면에 로그인 연결을 배치하고 CMDS Achmage의 설치·로그인 안내 및 기기별 실행 경로 재사용을 추가했습니다.
+- Claude는 매 요청 전 인증을 확인하며, OAuth 오류가 나면 준비 상태를 취소하고 재로그인을 안내합니다.
+- 로그인 정보 확인과 실제 응답 성공을 구분하며, Claude 실제 응답 확인 버튼을 추가했습니다.
+- [4.2.2 릴리즈 노트](RELEASE_NOTES_4.2.2.md) · [검증 범위](docs/LOGIN_4_2_2.md)
+
 ## 4.2.1 — 2026-10-06
 
 - 번들에 포함되는 Markdown 프롬프트의 줄바꿈을 LF로 통일해 Windows와 Linux의 빌드 결과를 같게 만들었습니다.

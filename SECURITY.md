@@ -8,11 +8,13 @@ The plugin runs nothing until you open its settings or use a Plan model. Every c
 
 | When | Command | Notes |
 |---|---|---|
-| Claude Plan connection check, and before a request (at most once a minute) | `claude --version`, `claude auth status` | Reads the version and the login state. No model request. |
+| Claude Plan connection check, and before every request | `claude --version`, `claude auth status` | Reads the version and the login state. No model request. |
 | Claude Plan request | `claude -p --setting-sources "" --verbose --output-format stream-json --no-session-persistence --safe-mode --permission-mode dontAsk --no-chrome --disable-slash-commands --strict-mcp-config --tools= --model <model> (--system-prompt-file <file> \| --system-prompt <text>) [--effort <level>]` | One prompt per run, sent on stdin. No tools, no MCP servers, no user or project settings. |
 | Gemini Plan connection check, and before a request (at most once a minute) | `agy --version`, `agy models` | Reads the version and the model list. No model request. |
 | Gemini Plan request | `agy -p <prompt> --output-format stream-json --model <model> --mode plan` | One prompt per run, in plan mode. |
 | You click **Open login terminal** | `claude auth login` or `agy` in a new terminal window | Windows: PowerShell via `cmd.exe /c start`. macOS: Terminal via `osascript`. Linux: `x-terminal-emulator`. You sign in inside the official tool. |
+| You click **Open terminal** in the installation guide | A blank terminal (`$null` on Windows, `:` on macOS/Linux) | Installation commands are displayed/copied only. You decide whether to run them. |
+| You click **Test response** for Claude | The same Claude Plan request command above, with a short verification prompt | Uses a small amount of the subscription quota; no vault note is sent. |
 | Claude Plan check on Windows | `reg.exe query HKLM\SOFTWARE\Policies\ClaudeCode` and the same key under `HKCU` | Read-only. Detects Claude Code policies an organization manages on this computer. |
 | You cancel a request, or it times out (Windows) | `taskkill.exe /pid <pid> /T /F` | Stops the CLI process the plugin started. |
 
@@ -27,6 +29,7 @@ A Claude Plan request also stops as soon as Claude Code reports an API-key login
 - **Claude Plan and Gemini Plan**: NotePack never reads, stores, or forwards their sign-in tokens. The CLIs keep their own login.
 - **OpenAI Plan**: the browser login uses OpenAI's OAuth with PKCE. During the login, a local callback server listens on `127.0.0.1:1455` (or `1457`). The resulting tokens are stored in the plugin data of your vault, and so are any API keys you enter. If your vault syncs, they sync with it.
 - **Device-local values**: the Team/Enterprise opt-in and custom executable paths are kept in Obsidian's local storage for this vault (`app.saveLocalStorage`). They never sync.
+- **CMDS path compatibility**: when NotePack has no valid custom path, it reads CMDS Achmage's `smart-composer:native-runtime-path:claude` or `:gemini` local storage entry. Only the executable path is reused; credentials are not copied.
 
 ## Network
 

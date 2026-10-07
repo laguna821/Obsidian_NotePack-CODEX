@@ -6,6 +6,7 @@
 
 최종 검증 연구: `research:rr-42fb8edb92a3ed5d6d39d2a0c88218ab:781e1d7284119192c98c6f14857ad96a5e4edfd68efb4689ac28a400c8c20d95` (R-009).
 참조 R-024: `research:rr-0896c43f4d5288f519c553770b6457d9:c2012b27777dbc1bc23aae40f53e0405b87b80fbee52aa1df1bb61340fb440a1`.
+기존 Achmage 설치 검증: `research:rr-42fb8edb92a3ed5d6d39d2a0c88218ab:950d9e33f43913612cf5b97635cd108f59b2ca0363d2485484aabe22ab27d9c6`.
 
 ## 확인한 결함
 
@@ -31,7 +32,10 @@
 - 첫 UI 재로딩은 Obsidian의 로드된 모듈을 재사용해 이전 화면을 보였다. 파일 해시가 일치함을 확인한 뒤 격리 앱을 완전히 다시 시작해서 변경 화면을 재검증했다.
 - 사용자가 보고한 노트북의 OAuth 오류는 아직 현지 재현되지 않았다. CMDS 경로 선택 차이는 가능한 원인이며 확정 원인이 아니다.
 - macOS·Linux 설치 및 실제 로그인 교체는 실행하지 않았다. 설치 명령/경로 분기는 검사했지만 기기 E2E 성공으로 세지 않는다.
-- 기존 사용자 볼트와 설정, CMDS 플러그인은 변경하지 않았다. 공개 배포는 하지 않았다.
+- 초기 격리 검증 이후 사용자가 기존 Achmage 적용과 GitHub 브랜치·main·릴리스를 명시적으로 승인했다.
+- 기존 Achmage의 플러그인 파일을 로컬 백업하고 4.2.2를 설치했다. `data.json` 해시와 메모리 내 설정 비교로 기존 설정 보존을 확인했다. CMDS 플러그인은 변경하지 않았다.
+- 설치된 4.2.2의 실제 작업 화면·팩 모달 코드로 합성 메모를 검증했다. Sonnet 주석 6.8초 / 카드 5장 7.4초, Opus 주석 8.7초 / 카드 5장 11.9초. 기기·입력·서버 상태에 따라 달라지는 단일 관측값이다. 사용자 노트를 전송하거나 저장 내용을 바꾸지 않았다.
+- 파일 없이 `setViewState`로 검증 화면을 여는 첫 시도에서 Obsidian이 빈 화면을 반환했다. 등록된 플러그인의 view factory를 임시 leaf에 직접 연결하고 저장 콜백을 비운 방식으로 검증했다. 검증 화면은 종료 후 정리했다.
 
 공식 설치 명령은 2026-10-07 [Claude 문서](https://code.claude.com/docs/en/installation)와
 [Antigravity 문서](https://antigravity.google/docs/cli/install)에서 재확인했다.

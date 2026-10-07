@@ -1,6 +1,14 @@
-# NotePack CODEX v4.2.1
+# NotePack CODEX v4.2.2
 
 <img width="1164" height="592" alt="{36FB16DC-E931-481F-B5E4-FB2E096C9A29}" src="https://github.com/user-attachments/assets/c61e26eb-d74e-43e1-b2d6-1f376d4af4d6" />
+
+## 4.2.2: 첫 화면에서 로그인 확인
+
+설정을 열면 **로그인 및 플랜 연결**이 먼저 보입니다. CMDS Achmage의 공식 도구 설치·로그인 안내와 기기별 실행 경로를 재사용하고, Claude는 요청마다 인증을 확인합니다. OAuth 오류가 나면 연결 상태를 갱신하고 재로그인을 안내합니다. **실제 응답 확인**으로 로그인 정보 확인과 모델 응답 성공을 구분할 수 있습니다.
+
+카드 생성과 페르소나 주석은 같은 로그인을 공유하며 모델은 각각 선택합니다. 기존 Achmage 볼트의 Windows / Obsidian 1.14.4 환경에서 Sonnet·Opus 카드·주석 생성을 확인했습니다. 다른 기기의 실제 로그인 상태는 해당 기기에서 확인해야 합니다.
+
+[4.2.2 변경 내역](RELEASE_NOTES_4.2.2.md) · [검증 범위](docs/LOGIN_4_2_2.md)
 
 ## 4.2.0: 질문 먼저, 작성 도움은 필요할 때
 
